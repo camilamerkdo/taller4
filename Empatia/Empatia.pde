@@ -1,377 +1,362 @@
-/*
- * OBRA DE ARTE GENERATIVO: "La Ruptura de la Línea" (Corrección de Reinicio y Huérfanos)
- * Código 100% compatible y corregido para Processing de escritorio (Java) y Android.
- *
- * Correcciones de esta versión:
- * - Efecto Acordeón: En el reinicio, los seguidores se comprimen hacia el líder.
- * - Limpieza absoluta: Se eliminan los círculos "fantasmas grises" al completar el repliegue.
- */
+ArrayList<Shape> freeShapes;
+ArrayList<Hub> hubs;
+ArrayList<Particle> particles;
 
-import java.util.ArrayList;
+Object draggedEntity = null; // Puede ser un Shape o un Hub
+float globalGlow = 0.0f;     // Brillo del fondo por los mandalas en equilibrio
 
-ArrayList<Circle> circles;
-ArrayList<Branch> branches;
-float flowSpeed = 2.0f; // Velocidad lineal constante unificada
-int spawnRate = 12;
-int spawnCounter = 0; 
-
-// Control del cuadrado interactivo
-PVector squarePos;
-boolean squareActive = false;
-float hueVal = 0; 
-float shakeIntensity = 0;
-PVector prevMouse;
-
-PVector startPoint;
-PVector endPoint;
-
-// Estados
-int appState = 0; 
-float colorResetFactor = 1.0f;
-
-// Gestión de Colores Robustos "Nunca se repiten"
-ArrayList<Integer> pastelHuesPool; 
-int currentHueIndex = 0;
-int lastHueUsed = -1; 
+int colTriangle;
+int colSquare;
+int colCircleActive;
 
 void setup() {
-  size(800, 600);
+  size(900, 700);
   smooth(8);
-  colorMode(HSB, 360, 100, 100);
+  rectMode(CENTER);
   
-  circles = new ArrayList<Circle>();
-  branches = new ArrayList<Branch>();
+  freeShapes = new ArrayList<Shape>();
+  hubs = new ArrayList<Hub>();
+  particles = new ArrayList<Particle>();
   
-  startPoint = new PVector(50, 50);
-  endPoint = new PVector(width - 50, height - 50);
-  squarePos = new PVector(0, 0);
-  prevMouse = new PVector(0, 0);
+  colTriangle = color(255, 183, 178);     // Rosa pastel
+  colSquare = color(199, 206, 234);       // Azul pastel
+  colCircleActive = color(175, 228, 222); // Cian/Verde pastel (El Núcleo)
   
-  int numHues = 36; 
-  int hueStep = 360 / numHues;
-  pastelHuesPool = new ArrayList<Integer>();
-  for (int i = 0; i < numHues; i++) pastelHuesPool.add(i * hueStep);
-  java.util.Collections.shuffle(pastelHuesPool); 
+  // Instanciar figuras sueltas
+  for (int i = 0; i < 10; i++) {
+    freeShapes.add(new Shape(0, random(100, width-100), random(100, height-100)));
+    freeShapes.add(new Shape(1, random(100, width-100), random(100, height-100)));
+  }
 }
 
 void draw() {
-  background(#0B0A10); 
+  int bgBase = color(5, 4, 9);
+  int bgResonant = color(22, 15, 38);
   
-  // 1. Generar círculos continuamente
-  if (frameCount % spawnRate == 0) {
-    int activePathCount = branches.size() + 1; 
-    int pathChoice = spawnCounter % activePathCount;
-    spawnCounter++;
+  float targetGlow = 0;
+  for (Hub h : hubs) if (h.isBalanced) targetGlow += 0.5f;
+  globalGlow = lerp(globalGlow, min(1.0f, targetGlow), 0.05f);
+  
+  background(lerpColor(bgBase, bgResonant, globalGlow));
+  
+  // 1. Dibujar y actualizar los Núcleos (Mandalas)
+  for (int i = hubs.size() - 1; i >= 0; i--) {
+    Hub h = hubs.get(i);
+    h.update();
+    h.display();
     
-    Circle c = new Circle();
-    if (pathChoice > 0 && appState != 2) {
-      c.isRebel = true;
-      c.activeBranch = branches.get(pathChoice - 1);
-    }
-    circles.add(c);
-  }
-  
-  // 2. Actualizar y dibujar círculos ACTIVOS PRIMERO 
-  for (int i = circles.size() - 1; i >= 0; i--) {
-    Circle c = circles.get(i);
-    c.update();
-    c.display();
-    if (c.dead) {
-      circles.remove(i);
+    if (h.members.size() < 2) {
+      for (Shape s : h.members) {
+        s.pos = s.orbitPos.copy();
+        freeShapes.add(s);
+      }
+      createExplosion(h.pos.x, h.pos.y, colCircleActive, 30);
+      hubs.remove(i);
     }
   }
   
-  // 3. Dibujar ramificaciones DESPUÉS (El cuadrado jefe se dibuja ENCIMA)
-  for (int i = 0; i < branches.size(); i++) {
-    Branch b = branches.get(i);
-    b.update();
-    b.display();
+  // 2. Dibujar figuras sueltas
+  for (Shape s : freeShapes) {
+    s.updatePhysics();
+    s.display();
   }
   
-  // 4. Dibujar e interactuar con el Cuadrado Cabecilla si está activo
-  if (squareActive) {
-    updateAndDrawSquare();
-  }
-  
-  // 5. Transición elástica de repliegue de reinicio
-  handleResetTransition();
-}
-
-void updateAndDrawSquare() {
-  squarePos.x = lerp(squarePos.x, mouseX, 0.15f);
-  squarePos.y = lerp(squarePos.y, mouseY, 0.15f);
-  
-  float d = dist(mouseX, mouseY, prevMouse.x, prevMouse.y);
-  shakeIntensity = lerp(shakeIntensity, d, 0.1f);
-  prevMouse.set(mouseX, mouseY);
-  
-  if (shakeIntensity > 5.0f) {
-    hueVal = (hueVal + shakeIntensity * 0.4f) % 360;
-  }
-  
-  int activeColor = color(hueVal, 40, 95);
-  
-  noFill();
-  stroke(hueVal, 40, 95, 40);
-  strokeWeight(2 + shakeIntensity * 0.2f);
-  rectMode(CENTER);
-  rect(squarePos.x, squarePos.y, 24 + shakeIntensity * 0.5f, 24 + shakeIntensity * 0.5f);
-  
-  fill(activeColor);
-  noStroke();
-  rect(squarePos.x, squarePos.y, 16, 16);
-}
-
-void handleResetTransition() {
-  if (appState == 2) {
-    colorResetFactor = lerp(colorResetFactor, 0.0f, 0.02f);
-    
-    boolean clean = true;
-    for (int i = 0; i < branches.size(); i++) {
-      Branch b = branches.get(i);
-      b.currentClick.x = lerp(b.currentClick.x, endPoint.x, 0.04f);
-      b.currentClick.y = lerp(b.currentClick.y, endPoint.y, 0.04f);
-      b.currentExit.x = lerp(b.currentExit.x, endPoint.x, 0.04f);
-      b.currentExit.y = lerp(b.currentExit.y, endPoint.y, 0.04f);
-      
-      if (dist(b.currentClick.x, b.currentClick.y, endPoint.x, endPoint.y) > 10.0f) {
-        clean = false;
+  // 3. Línea predictiva al acercar a un núcleo
+  if (draggedEntity instanceof Shape) {
+    Shape s = (Shape) draggedEntity;
+    for (Hub h : hubs) {
+      if (dist(s.pos.x, s.pos.y, h.pos.x, h.pos.y) < h.radius + 40) {
+        stroke(255, 150);
+        strokeWeight(2);
+        line(s.pos.x, s.pos.y, h.pos.x, h.pos.y);
       }
     }
-    
-    // CORRECCIÓN: Cuando la limpieza se completa, matamos a TODOS los rebeldes
-    if (clean && colorResetFactor < 0.01f) {
-      branches.clear();
+  }
+  
+  // Partículas
+  for (int i = particles.size() - 1; i >= 0; i--) {
+    Particle p = particles.get(i);
+    p.update();
+    p.display();
+    if (p.alpha <= 0) particles.remove(i);
+  }
+}
+
+// ==========================================
+// INTERACCIONES (Mouse)
+// ==========================================
+void mousePressed() {
+  float minDist = 35.0f;
+  
+  for (Hub h : hubs) {
+    if (dist(mouseX, mouseY, h.pos.x, h.pos.y) < 40) {
+      draggedEntity = h;
+      return;
+    }
+  }
+  
+  for (Hub h : hubs) {
+    for (int i = 0; i < h.members.size(); i++) {
+      Shape s = h.members.get(i);
+      if (dist(mouseX, mouseY, s.orbitPos.x, s.orbitPos.y) < minDist) {
+        h.members.remove(i);
+        s.pos = s.orbitPos.copy();
+        freeShapes.add(s);
+        draggedEntity = s;
+        createExplosion(s.pos.x, s.pos.y, 255, 10);
+        return;
+      }
+    }
+  }
+  
+  for (Shape s : freeShapes) {
+    if (dist(mouseX, mouseY, s.pos.x, s.pos.y) < minDist) {
+      minDist = dist(mouseX, mouseY, s.pos.x, s.pos.y);
+      draggedEntity = s;
+    }
+  }
+}
+
+void mouseReleased() {
+  if (draggedEntity != null) {
+    if (draggedEntity instanceof Shape) {
+      Shape draggedShape = (Shape) draggedEntity;
+      boolean attached = false;
       
-      for (int i = circles.size() - 1; i >= 0; i--) {
-        if (circles.get(i).isRebel) {
-          circles.get(i).dead = true;
+      for (Hub h : hubs) {
+        if (dist(draggedShape.pos.x, draggedShape.pos.y, h.pos.x, h.pos.y) < h.radius + 40) {
+          freeShapes.remove(draggedShape);
+          h.members.add(draggedShape);
+          createExplosion(draggedShape.pos.x, draggedShape.pos.y, draggedShape.baseColor, 15);
+          attached = true;
+          break;
         }
       }
       
-      appState = 0;
-      colorResetFactor = 1.0f;
+      if (!attached) {
+        for (Shape other : freeShapes) {
+          if (other != draggedShape) {
+            if (dist(draggedShape.pos.x, draggedShape.pos.y, other.pos.x, other.pos.y) < 60) {
+              // CORREGIDO: Uso correcto de PVector.lerp con objetos PVector
+              PVector mid = PVector.lerp(draggedShape.pos, other.pos, 0.5f);
+              Hub newHub = new Hub(mid.x, mid.y);
+              freeShapes.remove(draggedShape);
+              freeShapes.remove(other);
+              newHub.members.add(draggedShape);
+              newHub.members.add(other);
+              hubs.add(newHub);
+              createExplosion(mid.x, mid.y, colCircleActive, 30);
+              break;
+            }
+          }
+        }
+      }
+    } else if (draggedEntity instanceof Hub) {
+      Hub draggedHub = (Hub) draggedEntity;
+      for (int i = hubs.size() - 1; i >= 0; i--) {
+        Hub otherHub = hubs.get(i);
+        if (otherHub != draggedHub && dist(draggedHub.pos.x, draggedHub.pos.y, otherHub.pos.x, otherHub.pos.y) < draggedHub.radius + otherHub.radius) {
+          otherHub.members.addAll(draggedHub.members);
+          hubs.remove(draggedHub);
+          createExplosion(otherHub.pos.x, otherHub.pos.y, colCircleActive, 50);
+          break;
+        }
+      }
+    }
+    draggedEntity = null;
+  }
+}
+
+void createExplosion(float x, float y, int c, int count) {
+  for (int i = 0; i < count; i++) {
+    particles.add(new Particle(x, y, c));
+  }
+}
+
+// ==========================================
+// CLASES COMPLEMENTARIAS
+// ==========================================
+
+class Hub {
+  PVector pos;
+  ArrayList<Shape> members;
+  
+  float angle = 0;
+  float radius = 50;
+  float rotationSpeed = 0.015f;
+  
+  boolean isBalanced = false;
+  float balancePulse = 0;
+  
+  Hub(float x, float y) {
+    pos = new PVector(x, y);
+    members = new ArrayList<Shape>();
+  }
+  
+  void update() {
+    if (draggedEntity == this) {
+      pos.x = mouseX;
+      pos.y = mouseY;
+    } else {
+      pos.y += sin(frameCount * 0.02f + pos.x) * 0.2f;
+    }
+    
+    int countTri = 0;
+    int countSq = 0;
+    for (Shape s : members) {
+      if (s.type == 0) countTri++;
+      else countSq++;
+    }
+    
+    float targetRadius = 50 + (members.size() * 12);
+    radius = lerp(radius, targetRadius, 0.05f);
+    
+    isBalanced = (countTri == countSq && countTri > 0);
+    
+    if (isBalanced) {
+      rotationSpeed = lerp(rotationSpeed, 0.008f, 0.05f);
+      balancePulse = lerp(balancePulse, 1.0f, 0.05f);
+      if (frameCount % 10 == 0) createExplosion(pos.x, pos.y, colCircleActive, 1);
+    } else {
+      float imbalance = (countTri - countSq) * 0.01f; 
+      rotationSpeed = lerp(rotationSpeed, 0.015f + imbalance, 0.1f);
+      balancePulse = lerp(balancePulse, 0.0f, 0.1f);
+    }
+    
+    angle += rotationSpeed;
+    
+    for (int i = 0; i < members.size(); i++) {
+      Shape s = members.get(i);
+      float targetAngle = angle + (i * TWO_PI / members.size());
+      
+      float tx = pos.x + cos(targetAngle) * radius;
+      float ty = pos.y + sin(targetAngle) * radius;
+      
+      if (s.orbitPos == null) s.orbitPos = new PVector(tx, ty);
+      
+      s.orbitPos.x = lerp(s.orbitPos.x, tx, 0.1f);
+      s.orbitPos.y = lerp(s.orbitPos.y, ty, 0.1f);
+      
+      s.angle += (s.type == 0) ? 0.03f : 0.01f;
+    }
+  }
+  
+  void display() {
+    for (Shape s : members) {
+      strokeWeight(isBalanced ? 3 : 1.5f);
+      stroke(255, isBalanced ? 200 : 80);
+      line(pos.x, pos.y, s.orbitPos.x, s.orbitPos.y);
+    }
+    
+    if (isBalanced) {
+      noFill();
+      stroke(colCircleActive, 150 * (1.0f - (frameCount % 90)/90.0f));
+      strokeWeight(2);
+      float ringSize = radius * 2.5f * ((frameCount % 90)/90.0f);
+      ellipse(pos.x, pos.y, ringSize, ringSize);
+    }
+    
+    pushMatrix();
+    translate(pos.x, pos.y);
+    rotate(-angle);
+    
+    float coreSize = 35 + (balancePulse * 15);
+    fill(colCircleActive, 50 + 100 * balancePulse);
+    stroke(colCircleActive, 200 + 55 * balancePulse);
+    strokeWeight(3 + 2 * balancePulse);
+    ellipse(0, 0, coreSize, coreSize);
+    
+    fill(255, 150 + 100 * balancePulse);
+    noStroke();
+    ellipse(0, 0, coreSize * 0.4f, coreSize * 0.4f);
+    popMatrix();
+    
+    for (Shape s : members) {
+      s.displayAt(s.orbitPos.x, s.orbitPos.y);
     }
   }
 }
 
-void mousePressed() {
-  handleTouch(mouseX, mouseY);
-}
-
-void handleTouch(float tx, float ty) {
-  if (appState == 0) {
-    if (branches.size() >= 5) {
-      appState = 2; 
-      return;
+class Shape {
+  int type; 
+  PVector pos;
+  PVector orbitPos; 
+  PVector vel;
+  float angle;
+  int baseColor;
+  
+  Shape(int t, float x, float y) {
+    this.type = t;
+    this.pos = new PVector(x, y);
+    this.vel = PVector.random2D().mult(random(0.3f, 0.8f));
+    this.angle = random(TWO_PI);
+    this.baseColor = (type == 0) ? colTriangle : colSquare;
+  }
+  
+  void updatePhysics() {
+    if (draggedEntity == this) {
+      pos.x = mouseX;
+      pos.y = mouseY;
+      vel.set(0, 0);
+    } else {
+      pos.add(vel);
+      if (pos.x < 30 || pos.x > width - 30) vel.x *= -1;
+      if (pos.y < 30 || pos.y > height - 30) vel.y *= -1;
+      pos.x = constrain(pos.x, 30, width - 30);
+      pos.y = constrain(pos.y, 30, height - 30);
+      angle += 0.01f;
     }
+  }
+  
+  void display() {
+    displayAt(pos.x, pos.y);
+  }
+  
+  void displayAt(float dx, float dy) {
+    pushMatrix();
+    translate(dx, dy);
+    rotate(angle);
     
-    squareActive = true;
-    int border = (int) random(4);
-    if (border == 0) squarePos.set(random(width), -20);
-    else if (border == 1) squarePos.set(random(width), height + 20);
-    else if (border == 2) squarePos.set(-20, random(height));
-    else squarePos.set(width + 20, random(height));
+    stroke(baseColor, 180);
+    strokeWeight(2);
     
-    prevMouse.set(tx, ty);
-    appState = 1;
-  } 
-  else if (appState == 1) {
-    squareActive = false;
+    if (orbitPos != null && orbitPos.x == dx) fill(baseColor, 40);
+    else noFill();
     
-    PVector ap = PVector.sub(squarePos, startPoint);
-    PVector ab = PVector.sub(endPoint, startPoint);
-    ab.normalize();
-    float d = ap.dot(ab);
-    d = constrain(d, 50, PVector.dist(startPoint, endPoint) - 100);
-    PVector breakPt = PVector.add(startPoint, PVector.mult(ab, d));
-    
-    PVector dirSalidaAbs = PVector.sub(squarePos, breakPt);
-    dirSalidaAbs.normalize();
-    PVector exitPt = PVector.add(squarePos, PVector.mult(dirSalidaAbs, 1000));
-    
-    int finalHue = pastelHuesPool.get(currentHueIndex);
-    lastHueUsed = finalHue; 
-
-    int finalColor = color(finalHue, 40, 95);
-    
-    currentHueIndex++;
-    if (currentHueIndex >= pastelHuesPool.size()) { 
-      java.util.Collections.shuffle(pastelHuesPool);
-      while (pastelHuesPool.get(0) == lastHueUsed) java.util.Collections.shuffle(pastelHuesPool);
-      currentHueIndex = 0;
+    if (type == 0) {
+      float r = 18.0f;
+      beginShape();
+      for (int i = 0; i < 3; i++) {
+        float a = i * TWO_PI / 3.0f - HALF_PI;
+        vertex(cos(a) * r, sin(a) * r);
+      }
+      endShape(CLOSE);
+    } else if (type == 1) {
+      rect(0, 0, 28, 28);
     }
-    
-    branches.add(new Branch(breakPt, squarePos.copy(), exitPt, dirSalidaAbs, finalColor));
-    appState = 0;
+    popMatrix();
   }
 }
 
-class Branch {
-  PVector breakPoint;
-  PVector clickedPoint; 
-  PVector exitPoint;    
-  PVector dirSalidaNorm; 
+class Particle {
+  float x, y, vx, vy, size, alpha;
   int col;
   
-  PVector currentClick;
-  PVector currentExit;
-  boolean moving;
-  float squareT;
-  
-  ArrayList<Circle> followers; 
-  float separationDist = 38.0f; 
-  
-  Branch(PVector bPt, PVector cPt, PVector ePt, PVector dirSNorm, int col) {
-    this.breakPoint = bPt;
-    this.clickedPoint = cPt;
-    this.exitPoint = ePt;
-    this.dirSalidaNorm = dirSNorm.copy(); 
-    this.col = col;
-    this.currentClick = cPt.copy();
-    this.currentExit = ePt.copy();
-    this.moving = false;
-    this.squareT = 0.0f;
-    
-    this.followers = new ArrayList<Circle>();
-  }
-  
-  void addFollower(Circle c) {
-    if (!c.inChain) {
-      followers.add(c);
-      c.inChain = true; 
-    }
+  Particle(float nx, float ny, int c) {
+    x = nx; y = ny;
+    vx = random(-3, 3); vy = random(-3, 3);
+    size = random(3.0f, 7.0f);
+    alpha = 255; col = c;
   }
   
   void update() {
-    if (moving) {
-      if (appState != 2) {
-        float d = dist(clickedPoint.x, clickedPoint.y, exitPoint.x, exitPoint.y);
-        if (d > 1.0f) {
-          squareT += flowSpeed / d; 
-          if (squareT > 1.0f) squareT = 1.0f;
-        }
-        currentClick.x = lerp(clickedPoint.x, exitPoint.x, squareT);
-        currentClick.y = lerp(clickedPoint.y, exitPoint.y, squareT);
-      }
-      
-      // CORRECCIÓN: Actualizar seguidores siempre. 
-      // En reseteo (appState == 2), reducimos la separación multiplicando por colorResetFactor
-      // Esto crea un efecto elástico donde los círculos se comprimen hacia el líder.
-      float currentSep = (appState == 2) ? separationDist * colorResetFactor : separationDist;
-      
-      for (int i = 0; i < followers.size(); i++) {
-        Circle c = followers.get(i);
-        PVector offset = PVector.mult(dirSalidaNorm, (i + 1) * currentSep);
-        c.pos = PVector.sub(currentClick, offset);
-      }
-    }
+    x += vx; y += vy;
+    alpha -= 5.0f; 
   }
   
   void display() {
-    rectMode(CENTER);
-    fill(col, 30);
     noStroke();
-    rect(currentClick.x, currentClick.y, 24, 24);
-    
-    fill(col);
-    rect(currentClick.x, currentClick.y, 16, 16);
-  }
-}
-
-class Circle {
-  float segmentT = 0.0f;
-  int pathStep = 0;
-  PVector pos;
-  int baseColor;
-  boolean dead = false;
-  
-  boolean isRebel = false;
-  Branch activeBranch = null;
-  
-  boolean inChain = false; 
-  
-  Circle() {
-    this.pos = new PVector();
-    this.baseColor = color(0, 0, 45); 
-  }
-  
-  PVector getWaypoint(int step) {
-    if (isRebel && activeBranch != null) {
-      if (step == 0) return startPoint;
-      if (step == 1) return activeBranch.breakPoint;
-      if (step == 2) return activeBranch.clickedPoint;
-      return activeBranch.exitPoint; 
-    } else {
-      if (step == 0) return startPoint;
-      return endPoint;
-    }
-  }
-  
-  int getMaxSteps() {
-    return isRebel ? 4 : 2;
-  }
-  
-  void update() {
-    if (inChain) return;
-
-    PVector pA = getWaypoint(pathStep);
-    PVector pB = getWaypoint(pathStep + 1);
-    
-    float d = PVector.dist(pA, pB);
-    if (d > 0.5f) {
-      segmentT += flowSpeed / d; 
-    } else {
-      segmentT = 1.1f;
-    }
-    
-    if (segmentT >= 1.0f) {
-      segmentT = 0.0f;
-      
-      if (isRebel && activeBranch != null) {
-        if (pathStep == 1) { 
-          activeBranch.moving = true; 
-        }
-        if (pathStep == 2) { 
-          activeBranch.addFollower(this); 
-          return; 
-        }
-      }
-      
-      pathStep++;
-    }
-    
-    if (pathStep >= getMaxSteps() - 1) {
-      dead = true;
-      return;
-    }
-    
-    pA = getWaypoint(pathStep);
-    pB = getWaypoint(pathStep + 1);
-    pos = PVector.lerp(pA, pB, segmentT);
-  }
-  
-  void display() {
-    int finalColor;
-    if (isRebel && activeBranch != null) {
-      if (appState == 2) {
-        finalColor = lerpColor(baseColor, activeBranch.col, colorResetFactor);
-      } else {
-        finalColor = activeBranch.col;
-      }
-    } else {
-      finalColor = baseColor;
-    }
-    
-    if (isRebel) {
-      fill(finalColor, 25);
-      noStroke();
-      ellipse(pos.x, pos.y, 30, 30);
-    }
-    
-    fill(finalColor);
-    stroke(0, 0, 100, 15);
-    strokeWeight(1);
-    ellipse(pos.x, pos.y, 16, 16);
+    fill(col, alpha);
+    ellipse(x, y, size, size);
   }
 }
