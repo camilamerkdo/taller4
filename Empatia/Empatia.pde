@@ -1,362 +1,266 @@
-ArrayList<Shape> freeShapes;
-ArrayList<Hub> hubs;
-ArrayList<Particle> particles;
+ArrayList<TriangleShape> triangles;
+SquareShape mainSquare;
 
-Object draggedEntity = null; // Puede ser un Shape o un Hub
-float globalGlow = 0.0f;     // Brillo del fondo por los mandalas en equilibrio
+boolean empathyUnlocked = false; 
+boolean isIntegrated = false;    
+float transitionProgress = 0.0f; 
+float globalGlow = 0.0f;
 
+// Colores
 int colTriangle;
 int colSquare;
 int colCircleActive;
+
+// Centro de la pantalla y de la trama
+float gridCX = 450;
+float gridCY = 350;
+
+// Variables de detección de movimiento (Shake)
+float shakeIntensity = 0;
 
 void setup() {
   size(900, 700);
   smooth(8);
   rectMode(CENTER);
   
-  freeShapes = new ArrayList<Shape>();
-  hubs = new ArrayList<Hub>();
-  particles = new ArrayList<Particle>();
+  triangles = new ArrayList<TriangleShape>();
   
-  colTriangle = color(255, 183, 178);     // Rosa pastel
-  colSquare = color(199, 206, 234);       // Azul pastel
-  colCircleActive = color(175, 228, 222); // Cian/Verde pastel (El Núcleo)
+  colTriangle = color(255, 183, 178);     // Rosa pastel sólido
+  colSquare = color(199, 206, 234);       // Azul pastel sólido
+  colCircleActive = color(175, 228, 222); // Cian pastel
   
-  // Instanciar figuras sueltas
-  for (int i = 0; i < 10; i++) {
-    freeShapes.add(new Shape(0, random(100, width-100), random(100, height-100)));
-    freeShapes.add(new Shape(1, random(100, width-100), random(100, height-100)));
+  // Parámetros de la grilla de grupos ampliada para cubrir toda la pantalla
+  float S = 32.0f;       
+  float margin = 2.0f;   
+  float step = 44.0f;    
+  
+  ArrayList<PVector> targetPositions = new ArrayList<PVector>();
+  ArrayList<Float> targetAngles = new ArrayList<Float>();
+  
+  // 1. Calcular las posiciones finales cubriendo toda la pantalla (16 col x 12 filas de grupos)
+  int groupCols = 16;
+  int groupRows = 12;
+  
+  for (int r = 0; r < groupRows; r++) {
+    for (int c = 0; c < groupCols; c++) {
+      // Dejar un hueco central ligeramente más holgado (2x2 de grupos) para que el cuadrado respire
+      if ((c >= 7 && c <= 8) && (r >= 5 && r <= 6)) continue; 
+      
+      float gx = gridCX + (c - (groupCols - 1) / 2.0f) * step;
+      float gy = gridCY + (r - (groupRows - 1) / 2.0f) * step;
+      
+      float distToCentroid = (S / 3.0f) + margin;
+      
+      targetPositions.add(new PVector(gx, gy - distToCentroid));
+      targetAngles.add(PI); 
+      targetPositions.add(new PVector(gx + distToCentroid, gy));
+      targetAngles.add(-HALF_PI);
+      targetPositions.add(new PVector(gx, gy + distToCentroid));
+      targetAngles.add(0.0f); 
+      targetPositions.add(new PVector(gx - distToCentroid, gy));
+      targetAngles.add(HALF_PI); 
+    }
   }
+  
+  // 2. Crear los triángulos en la trama densa inicial con mayor separación
+  int initCols = 32;
+  
+  float spacingX = 34.0f; 
+  float spacingY = 36.0f; 
+  
+  float startX = gridCX - ((initCols - 1) * spacingX) / 2.0f;
+  float startY = 30.0f; 
+  
+  for (int i = 0; i < targetPositions.size(); i++) {
+    int row = i / initCols;
+    int col = i % initCols;
+    
+    float ix = startX + col * spacingX + (row % 2) * (spacingX / 2.0f);
+    float iy = startY + row * spacingY;
+    
+    triangles.add(new TriangleShape(ix, iy, targetPositions.get(i), targetAngles.get(i), S));
+  }
+  
+  // 3. Posición y tamaño del cuadrado abajo (Reducido a 72.0f para un margen estético perfecto)
+  float squareSize = 72.0f; 
+  mainSquare = new SquareShape(gridCX, 655, squareSize);
 }
 
 void draw() {
   int bgBase = color(5, 4, 9);
   int bgResonant = color(22, 15, 38);
   
-  float targetGlow = 0;
-  for (Hub h : hubs) if (h.isBalanced) targetGlow += 0.5f;
-  globalGlow = lerp(globalGlow, min(1.0f, targetGlow), 0.05f);
-  
+  globalGlow = lerp(globalGlow, isIntegrated ? 1.0f : 0.0f, 0.05f);
   background(lerpColor(bgBase, bgResonant, globalGlow));
   
-  // 1. Dibujar y actualizar los Núcleos (Mandalas)
-  for (int i = hubs.size() - 1; i >= 0; i--) {
-    Hub h = hubs.get(i);
-    h.update();
-    h.display();
+  // ==========================================
+  // LÓGICA DE TRANSICIÓN (9 SEGUNDOS TOTALES)
+  // ==========================================
+  if (empathyUnlocked && transitionProgress < 1.0f) {
+    transitionProgress += 1.0f / 540.0f; 
+    if (transitionProgress > 1.0f) transitionProgress = 1.0f;
+  }
+  
+  // Detección de agitación SOLO si el cuadrado está agarrado
+  if (mainSquare.isDragging && !empathyUnlocked) {
+    float mouseVel = dist(mouseX, mouseY, pmouseX, pmouseY);
+    shakeIntensity = lerp(shakeIntensity, mouseVel, 0.2f);
     
-    if (h.members.size() < 2) {
-      for (Shape s : h.members) {
-        s.pos = s.orbitPos.copy();
-        freeShapes.add(s);
-      }
-      createExplosion(h.pos.x, h.pos.y, colCircleActive, 30);
-      hubs.remove(i);
+    if (shakeIntensity > 40) {
+      empathyUnlocked = true;
     }
+  } else if (!mainSquare.isDragging) {
+    shakeIntensity = 0; 
   }
   
-  // 2. Dibujar figuras sueltas
-  for (Shape s : freeShapes) {
-    s.updatePhysics();
-    s.display();
+  
+  // Actualizar y dibujar
+  for (TriangleShape t : triangles) {
+    t.update();
+    t.display();
   }
   
-  // 3. Línea predictiva al acercar a un núcleo
-  if (draggedEntity instanceof Shape) {
-    Shape s = (Shape) draggedEntity;
-    for (Hub h : hubs) {
-      if (dist(s.pos.x, s.pos.y, h.pos.x, h.pos.y) < h.radius + 40) {
-        stroke(255, 150);
-        strokeWeight(2);
-        line(s.pos.x, s.pos.y, h.pos.x, h.pos.y);
-      }
-    }
-  }
-  
-  // Partículas
-  for (int i = particles.size() - 1; i >= 0; i--) {
-    Particle p = particles.get(i);
-    p.update();
-    p.display();
-    if (p.alpha <= 0) particles.remove(i);
-  }
+  mainSquare.update();
+  mainSquare.display();
+}
+
+float easeInOutCubic(float x) {
+  return x < 0.5f ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2.0f;
 }
 
 // ==========================================
-// INTERACCIONES (Mouse)
+// INTERACCIONES
 // ==========================================
 void mousePressed() {
-  float minDist = 35.0f;
-  
-  for (Hub h : hubs) {
-    if (dist(mouseX, mouseY, h.pos.x, h.pos.y) < 40) {
-      draggedEntity = h;
-      return;
-    }
-  }
-  
-  for (Hub h : hubs) {
-    for (int i = 0; i < h.members.size(); i++) {
-      Shape s = h.members.get(i);
-      if (dist(mouseX, mouseY, s.orbitPos.x, s.orbitPos.y) < minDist) {
-        h.members.remove(i);
-        s.pos = s.orbitPos.copy();
-        freeShapes.add(s);
-        draggedEntity = s;
-        createExplosion(s.pos.x, s.pos.y, 255, 10);
-        return;
-      }
-    }
-  }
-  
-  for (Shape s : freeShapes) {
-    if (dist(mouseX, mouseY, s.pos.x, s.pos.y) < minDist) {
-      minDist = dist(mouseX, mouseY, s.pos.x, s.pos.y);
-      draggedEntity = s;
-    }
+  if (dist(mouseX, mouseY, mainSquare.pos.x, mainSquare.pos.y) < mainSquare.size / 2) {
+    mainSquare.isDragging = true;
   }
 }
 
 void mouseReleased() {
-  if (draggedEntity != null) {
-    if (draggedEntity instanceof Shape) {
-      Shape draggedShape = (Shape) draggedEntity;
-      boolean attached = false;
-      
-      for (Hub h : hubs) {
-        if (dist(draggedShape.pos.x, draggedShape.pos.y, h.pos.x, h.pos.y) < h.radius + 40) {
-          freeShapes.remove(draggedShape);
-          h.members.add(draggedShape);
-          createExplosion(draggedShape.pos.x, draggedShape.pos.y, draggedShape.baseColor, 15);
-          attached = true;
-          break;
+  if (mainSquare.isDragging) {
+    mainSquare.isDragging = false;
+    
+    // Si intenta soltarlo cerca del centro de la trama
+    if (dist(mainSquare.pos.x, mainSquare.pos.y, gridCX, gridCY) < 180) {
+      if (empathyUnlocked && transitionProgress > 0.95f) {
+        if (dist(mainSquare.pos.x, mainSquare.pos.y, gridCX, gridCY) < 80) {
+          mainSquare.targetPos.set(gridCX, gridCY);
+          isIntegrated = true;
+        } else {
+          mainSquare.targetPos.set(gridCX, 655); 
         }
+      } else {
+        // RECHAZO: La trama aún es un bloque rígido
+        mainSquare.targetPos.set(gridCX, 655);
       }
-      
-      if (!attached) {
-        for (Shape other : freeShapes) {
-          if (other != draggedShape) {
-            if (dist(draggedShape.pos.x, draggedShape.pos.y, other.pos.x, other.pos.y) < 60) {
-              // CORREGIDO: Uso correcto de PVector.lerp con objetos PVector
-              PVector mid = PVector.lerp(draggedShape.pos, other.pos, 0.5f);
-              Hub newHub = new Hub(mid.x, mid.y);
-              freeShapes.remove(draggedShape);
-              freeShapes.remove(other);
-              newHub.members.add(draggedShape);
-              newHub.members.add(other);
-              hubs.add(newHub);
-              createExplosion(mid.x, mid.y, colCircleActive, 30);
-              break;
-            }
-          }
-        }
-      }
-    } else if (draggedEntity instanceof Hub) {
-      Hub draggedHub = (Hub) draggedEntity;
-      for (int i = hubs.size() - 1; i >= 0; i--) {
-        Hub otherHub = hubs.get(i);
-        if (otherHub != draggedHub && dist(draggedHub.pos.x, draggedHub.pos.y, otherHub.pos.x, otherHub.pos.y) < draggedHub.radius + otherHub.radius) {
-          otherHub.members.addAll(draggedHub.members);
-          hubs.remove(draggedHub);
-          createExplosion(otherHub.pos.x, otherHub.pos.y, colCircleActive, 50);
-          break;
-        }
-      }
+    } else {
+      mainSquare.targetPos.set(gridCX, 655);
     }
-    draggedEntity = null;
-  }
-}
-
-void createExplosion(float x, float y, int c, int count) {
-  for (int i = 0; i < count; i++) {
-    particles.add(new Particle(x, y, c));
   }
 }
 
 // ==========================================
-// CLASES COMPLEMENTARIAS
+// CLASES
 // ==========================================
-
-class Hub {
+class TriangleShape {
   PVector pos;
-  ArrayList<Shape> members;
+  PVector initPos, empathyPos;
+  float angle;
+  float initAngle, empathyAngle;
+  float size;
   
-  float angle = 0;
-  float radius = 50;
-  float rotationSpeed = 0.015f;
-  
-  boolean isBalanced = false;
-  float balancePulse = 0;
-  
-  Hub(float x, float y) {
-    pos = new PVector(x, y);
-    members = new ArrayList<Shape>();
+  TriangleShape(float ix, float iy, PVector ePos, float eAng, float S) {
+    this.pos = new PVector(ix, iy);
+    this.initPos = new PVector(ix, iy);
+    this.empathyPos = ePos;
+    
+    this.angle = 0.0f; 
+    this.initAngle = 0.0f;
+    this.empathyAngle = eAng;
+    this.size = S;
   }
   
   void update() {
-    if (draggedEntity == this) {
-      pos.x = mouseX;
-      pos.y = mouseY;
+    if (!empathyUnlocked) {
+      PVector targetState = initPos.copy();
+      float d = PVector.dist(mainSquare.pos, initPos);
+      float repelRadius = 200.0f; 
+      
+      if (d < repelRadius) {
+        PVector dir = PVector.sub(initPos, mainSquare.pos);
+        dir.normalize();
+        float strength = map(d, 0, repelRadius, 45.0f, 0.0f); 
+        targetState.add(dir.mult(strength));
+        targetState.x += random(-3.0f, 3.0f);
+        targetState.y += random(-3.0f, 3.0f);
+      }
+      
+      pos.x = lerp(pos.x, targetState.x, 0.15f);
+      pos.y = lerp(pos.y, targetState.y, 0.15f);
+      angle = initAngle;
+      
     } else {
-      pos.y += sin(frameCount * 0.02f + pos.x) * 0.2f;
-    }
-    
-    int countTri = 0;
-    int countSq = 0;
-    for (Shape s : members) {
-      if (s.type == 0) countTri++;
-      else countSq++;
-    }
-    
-    float targetRadius = 50 + (members.size() * 12);
-    radius = lerp(radius, targetRadius, 0.05f);
-    
-    isBalanced = (countTri == countSq && countTri > 0);
-    
-    if (isBalanced) {
-      rotationSpeed = lerp(rotationSpeed, 0.008f, 0.05f);
-      balancePulse = lerp(balancePulse, 1.0f, 0.05f);
-      if (frameCount % 10 == 0) createExplosion(pos.x, pos.y, colCircleActive, 1);
-    } else {
-      float imbalance = (countTri - countSq) * 0.01f; 
-      rotationSpeed = lerp(rotationSpeed, 0.015f + imbalance, 0.1f);
-      balancePulse = lerp(balancePulse, 0.0f, 0.1f);
-    }
-    
-    angle += rotationSpeed;
-    
-    for (int i = 0; i < members.size(); i++) {
-      Shape s = members.get(i);
-      float targetAngle = angle + (i * TWO_PI / members.size());
+      float t = easeInOutCubic(transitionProgress);
       
-      float tx = pos.x + cos(targetAngle) * radius;
-      float ty = pos.y + sin(targetAngle) * radius;
+      pos.x = lerp(initPos.x, empathyPos.x, t);
+      pos.y = lerp(initPos.y, empathyPos.y, t);
       
-      if (s.orbitPos == null) s.orbitPos = new PVector(tx, ty);
-      
-      s.orbitPos.x = lerp(s.orbitPos.x, tx, 0.1f);
-      s.orbitPos.y = lerp(s.orbitPos.y, ty, 0.1f);
-      
-      s.angle += (s.type == 0) ? 0.03f : 0.01f;
+      float diff = empathyAngle - initAngle;
+      while (diff < -PI) diff += TWO_PI;
+      while (diff > PI) diff -= TWO_PI;
+      angle = initAngle + diff * t;
     }
   }
   
   void display() {
-    for (Shape s : members) {
-      strokeWeight(isBalanced ? 3 : 1.5f);
-      stroke(255, isBalanced ? 200 : 80);
-      line(pos.x, pos.y, s.orbitPos.x, s.orbitPos.y);
-    }
-    
-    if (isBalanced) {
-      noFill();
-      stroke(colCircleActive, 150 * (1.0f - (frameCount % 90)/90.0f));
-      strokeWeight(2);
-      float ringSize = radius * 2.5f * ((frameCount % 90)/90.0f);
-      ellipse(pos.x, pos.y, ringSize, ringSize);
-    }
-    
     pushMatrix();
     translate(pos.x, pos.y);
-    rotate(-angle);
-    
-    float coreSize = 35 + (balancePulse * 15);
-    fill(colCircleActive, 50 + 100 * balancePulse);
-    stroke(colCircleActive, 200 + 55 * balancePulse);
-    strokeWeight(3 + 2 * balancePulse);
-    ellipse(0, 0, coreSize, coreSize);
-    
-    fill(255, 150 + 100 * balancePulse);
-    noStroke();
-    ellipse(0, 0, coreSize * 0.4f, coreSize * 0.4f);
-    popMatrix();
-    
-    for (Shape s : members) {
-      s.displayAt(s.orbitPos.x, s.orbitPos.y);
-    }
-  }
-}
-
-class Shape {
-  int type; 
-  PVector pos;
-  PVector orbitPos; 
-  PVector vel;
-  float angle;
-  int baseColor;
-  
-  Shape(int t, float x, float y) {
-    this.type = t;
-    this.pos = new PVector(x, y);
-    this.vel = PVector.random2D().mult(random(0.3f, 0.8f));
-    this.angle = random(TWO_PI);
-    this.baseColor = (type == 0) ? colTriangle : colSquare;
-  }
-  
-  void updatePhysics() {
-    if (draggedEntity == this) {
-      pos.x = mouseX;
-      pos.y = mouseY;
-      vel.set(0, 0);
-    } else {
-      pos.add(vel);
-      if (pos.x < 30 || pos.x > width - 30) vel.x *= -1;
-      if (pos.y < 30 || pos.y > height - 30) vel.y *= -1;
-      pos.x = constrain(pos.x, 30, width - 30);
-      pos.y = constrain(pos.y, 30, height - 30);
-      angle += 0.01f;
-    }
-  }
-  
-  void display() {
-    displayAt(pos.x, pos.y);
-  }
-  
-  void displayAt(float dx, float dy) {
-    pushMatrix();
-    translate(dx, dy);
     rotate(angle);
     
-    stroke(baseColor, 180);
-    strokeWeight(2);
+    noStroke();
+    fill(colTriangle);
     
-    if (orbitPos != null && orbitPos.x == dx) fill(baseColor, 40);
-    else noFill();
+    beginShape();
+    vertex(-size/2, size/6.0f);
+    vertex(size/2, size/6.0f);
+    vertex(0, -size/3.0f);
+    endShape(CLOSE);
     
-    if (type == 0) {
-      float r = 18.0f;
-      beginShape();
-      for (int i = 0; i < 3; i++) {
-        float a = i * TWO_PI / 3.0f - HALF_PI;
-        vertex(cos(a) * r, sin(a) * r);
-      }
-      endShape(CLOSE);
-    } else if (type == 1) {
-      rect(0, 0, 28, 28);
-    }
     popMatrix();
   }
 }
 
-class Particle {
-  float x, y, vx, vy, size, alpha;
-  int col;
+class SquareShape {
+  PVector pos, targetPos;
+  float size;
+  boolean isDragging = false;
   
-  Particle(float nx, float ny, int c) {
-    x = nx; y = ny;
-    vx = random(-3, 3); vy = random(-3, 3);
-    size = random(3.0f, 7.0f);
-    alpha = 255; col = c;
+  SquareShape(float x, float y, float s) {
+    this.pos = new PVector(x, y);
+    this.targetPos = new PVector(x, y);
+    this.size = s;
   }
   
   void update() {
-    x += vx; y += vy;
-    alpha -= 5.0f; 
+    if (isDragging) {
+      pos.x = mouseX;
+      pos.y = mouseY;
+    } else {
+      pos.x = lerp(pos.x, targetPos.x, 0.1f);
+      pos.y = lerp(pos.y, targetPos.y, 0.1f);
+    }
   }
   
   void display() {
+    pushMatrix();
+    translate(pos.x, pos.y);
+    
     noStroke();
-    fill(col, alpha);
-    ellipse(x, y, size, size);
+    fill(colSquare);
+    
+    rect(0, 0, size, size);
+    
+    popMatrix();
   }
 }
