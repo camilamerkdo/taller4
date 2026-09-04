@@ -1,415 +1,285 @@
-/*
- * OBRA DE ARTE GENERATIVO: "La Ruptura de la Línea" (Versión Processing Pura - Corregida)
- * - 1er Click: Detiene la fila en el centro.
- * - Movimiento rápido del mouse sobre el cuadrado central (Shake): Activa colores pastel aleatorios.
- * - 2do Click: Define la trayectoria OPUESTA. Los cuadrados rebeldes se disparan con gradientes.
- * - Reinicio automático tras 9 segundos.
- */
+// ==========================================
+// IDENTIDAD: Reafirmación (Cambio Directo y Área Suave)
+// ==========================================
 
-ArrayList<Square> squares;
-float flowSpeed = 0.003f;
-int spawnRate = 14; 
-
-// Puntos de control vectoriales
-PVector startPoint;
-PVector endPoint;
-PVector breakPoint;
-PVector targetPoint;
-PVector newEndPoint;
-
-// Estados del sistema: 
-// 0: Conformidad, 1: Congelado/Esperando agitación, 2: Cargado/Esperando dirección, 3: Disparo opuesto, 4: Retorno
-int appState = 0; 
-int activeColor;
-boolean spawnColored = false;
-Square selectedSquare = null;
-float breakT = 0.0f;
-
-// Factores físicos de transición
-float stopFactor = 0.0f;
-float pathMorphFactor = 0.0f;
-float colorResetFactor = 1.0f;
-
-// Temporizadores y agitación
-int timerStart = 0;
-int timerDuration = 9000; // Duración aumentada a 9 segundos para mayor apreciación
-float shakeProgress = 0;
-float shakeTarget = 150;
-
-// Partículas decorativas de impacto
+ArrayList<ExternalShape> externalShapes;
 ArrayList<Particle> particles;
+ExternalShape draggedShape = null;
 
-// Colores pastel
-int[] pastelColors;
+// Lógica de Identidad
+int currentIdentity = 0;     // 0 = Triángulo, 1 = Cuadrado, 2 = Círculo
+boolean isMasked = false;    
+int maskTimer = 0;           // Temporizador de 5 segundos
+int maskDuration = 5000;     
+
+// Sistema de inmunidad para evitar el bug de re-transformación
+int cooldownTimer = 0;       
+int cooldownDuration = 1500; // 1.5 segundos de inmunidad tras estallar
+
+float pulseScale = 1.0f;     // Escala para el latido
+
+// Colores
+int colTriangle;
+int colSquare;
+int colCircle;
+
+// Centro de la pantalla
+float cx, cy;
+float R = 75.0f; 
+float influenceRadius = 180.0f;
 
 void setup() {
-  size(800, 600);
+  size(900, 700);
   smooth(8);
   rectMode(CENTER);
   
-  squares = new ArrayList<Square>();
+  cx = width / 2;
+  cy = height / 2;
+  
+  colTriangle = color(255, 183, 178); 
+  colSquare = color(199, 206, 234);   
+  colCircle = color(175, 228, 222);   
+  
+  externalShapes = new ArrayList<ExternalShape>();
   particles = new ArrayList<Particle>();
   
-  startPoint = new PVector(80, 80);
-  endPoint = new PVector(width - 80, height - 80);
-  breakPoint = new PVector(width / 2, height / 2);
-  targetPoint = new PVector(0, 0);
-  newEndPoint = new PVector(0, 0);
-  
-  activeColor = color(110, 115, 125);
-  
-  // Inicializar paleta pastel
-  pastelColors = new int[] {
-    color(255, 183, 178), color(255, 218, 193), color(226, 240, 203), 
-    color(191, 252, 198), color(199, 206, 234), color(255, 154, 162), 
-    color(232, 197, 229), color(175, 228, 222), color(252, 225, 212)
-  };
+  // Crear 12 cuadrados y 12 círculos flotando fuera
+  for (int i = 0; i < 12; i++) {
+    externalShapes.add(new ExternalShape(1, random(20, width-20), random(20, 100)));
+    externalShapes.add(new ExternalShape(2, random(20, width-20), random(height-100, height-20)));
+  }
 }
 
 void draw() {
-  // Fondo sólido (Elimina por completo la acumulación de luz y las estelas de barrido)
-  background(5, 4, 9);
-
-  // Generación constante de figuras
-  if (frameCount % spawnRate == 0) {
-    squares.add(new Square());
+  int bgBase = color(5, 4, 9);
+  int bgMasked = color(20, 25, 40); 
+  
+  background(lerpColor(bgBase, bgMasked, isMasked ? 1.0f : 0.0f));
+  
+  // 1. DIBUJAR ZONA DE INFLUENCIA (Relleno suave)
+  noStroke();
+  int zoneColor = isMasked ? color(255, 150, 150) : color(255, 255, 255);
+  fill(zoneColor, 25); // Un fill con mucha transparencia (suave)
+  ellipse(cx, cy, influenceRadius * 2, influenceRadius * 2);
+  
+  // 2. ANALIZAR LA PRESIÓN EXTERNA
+  int countSq = 0;
+  int countCir = 0;
+  
+  for (ExternalShape s : externalShapes) {
+    if (dist(s.pos.x, s.pos.y, cx, cy) < influenceRadius) {
+      if (s.type == 1) countSq++;
+      else if (s.type == 2) countCir++;
+    }
   }
-
-  // Dibujar sutil línea de flujo de fondo
-  stroke(255, 255, 255, 6);
-  strokeWeight(1);
-  line(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
-
-  // Detección de agitación del mouse en el centro (Estados 1 y 2)
-  if (appState == 1) {
-    float d = dist(mouseX, mouseY, breakPoint.x, breakPoint.y);
-    if (d < 50) {
-      float speed = dist(mouseX, mouseY, pmouseX, pmouseY);
-      if (speed > 10) {
-        shakeProgress += speed * 0.15f;
-        
-        // Chispas de agitación cinética
-        if (frameCount % 3 == 0) {
-          activeColor = pastelColors[int(random(pastelColors.length))];
-          createExplosion(breakPoint.x, breakPoint.y, activeColor, 2);
-        }
-        
-        if (shakeProgress >= shakeTarget) {
-          createExplosion(breakPoint.x, breakPoint.y, activeColor, 35);
-          appState = 2; // Cargado y listo
+  
+  // 3. LÓGICA DE CAMBIO DIRECTO Y REAFIRMACIÓN
+  if (!isMasked) {
+    // Solo puede cambiar si no está en tiempo de inmunidad
+    if (millis() - cooldownTimer > cooldownDuration) {
+      if (countSq >= 4) {
+        currentIdentity = 1; // Se vuelve Cuadrado
+        isMasked = true;
+        maskTimer = millis();
+        pulseScale = 1.4f; 
+        createExplosion(cx, cy, colSquare, 40);
+      } 
+      else if (countCir >= 4) {
+        currentIdentity = 2; // Se vuelve Círculo
+        isMasked = true;
+        maskTimer = millis();
+        pulseScale = 1.4f;
+        createExplosion(cx, cy, colCircle, 40);
+      }
+    }
+  } 
+  else {
+    // Si tiene identidad falsa, cuenta 5 segundos
+    if (millis() - maskTimer >= maskDuration) {
+      // ¡REAFIRMACIÓN! Vuelve a ser triángulo
+      currentIdentity = 0; 
+      isMasked = false;
+      pulseScale = 1.8f; 
+      
+      // Activar inmunidad para evitar bugs
+      cooldownTimer = millis(); 
+      
+      createExplosion(cx, cy, colTriangle, 80);
+      
+      // Expulsar violentamente a las figuras
+      for (ExternalShape s : externalShapes) {
+        float d = dist(s.pos.x, s.pos.y, cx, cy);
+        if (d < influenceRadius + 50) {
+          PVector push = PVector.sub(s.pos, new PVector(cx, cy));
+          if (push.mag() == 0) push = PVector.random2D(); // Por si está justo en el centro
+          push.normalize();
+          push.mult(28.0f); // Fuerza de expulsión masiva
+          s.vel.add(push);
         }
       }
     }
   }
-
-  // Dibujar vector de trayectoria si está disparando (Estado 3)
-  if (appState == 3) {
-    stroke(activeColor, 30);
-    strokeWeight(1);
-    line(startPoint.x, startPoint.y, breakPoint.x, breakPoint.y);
-    line(breakPoint.x, breakPoint.y, newEndPoint.x, newEndPoint.y);
+  
+  // Suavizar el latido (vuelve a escala 1.0)
+  pulseScale = lerp(pulseScale, 1.0f, 0.1f);
+  
+  // 4. DIBUJAR LA IDENTIDAD CENTRAL
+  pushMatrix();
+  translate(cx, cy);
+  scale(pulseScale);
+  
+  int currentColor = (currentIdentity == 1) ? colSquare : (currentIdentity == 2) ? colCircle : colTriangle;
+  
+  noStroke();
+  fill(currentColor);
+  
+  if (currentIdentity == 0) {
+    beginShape();
+    vertex(0, -R);
+    vertex(R * 0.866f, R * 0.5f);
+    vertex(-R * 0.866f, R * 0.5f);
+    endShape(CLOSE);
+  } 
+  else if (currentIdentity == 1) {
+    rect(0, 0, R * 1.7f, R * 1.7f);
+  } 
+  else if (currentIdentity == 2) {
+    ellipse(0, 0, R * 1.9f, R * 1.9f);
   }
-
-  // Actualizar y dibujar cuadrados
-  for (int i = squares.size() - 1; i >= 0; i--) {
-    Square s = squares.get(i);
+  
+  // Detalle Poético: El "corazón" interno triangular
+  float innerPulse = 1.0f + 0.15f * sin(frameCount * 0.1f);
+  scale(0.25f * innerPulse);
+  fill(255, 200);
+  beginShape();
+  vertex(0, -R); 
+  vertex(R * 0.866f, R * 0.5f);
+  vertex(-R * 0.866f, R * 0.5f);
+  endShape(CLOSE);
+  
+  popMatrix();
+  
+  
+  // 6. ACTUALIZAR Y DIBUJAR FIGURAS EXTERNAS
+  for (ExternalShape s : externalShapes) {
     s.update();
     s.display();
-    
-    // Detección física de límites de pantalla para evitar el retorno forzado/snap back de figuras lejanas
-    boolean outOfBounds = (s.pos.x < -50 || s.pos.x > width + 50 || s.pos.y < -50 || s.pos.y > height + 50);
-
-    if (s.t >= 1.0f || outOfBounds) {
-      squares.remove(i);
-    }
   }
-
-  // Actualizar y dIbujar chispas/partículas
-  for (int i = particles.size() - 1; i >= 0; i--) {
-    Particle p = particles.get(i);
-    p.update();
-    p.display();
-    if (p.alpha <= 0) {
-      particles.remove(i);
-    }
-  }
-
-  handleTransitions();
+  
 }
 
-void handleTransitions() {
-  if (appState == 1 || appState == 2) {
-    stopFactor = lerp(stopFactor, 1.0f, 0.05f);
-  }
-
-  if (appState == 3) {
-    pathMorphFactor = lerp(pathMorphFactor, 1.0f, 0.06f);
-    
-    // Temporizador de reinicio
-    if (millis() - timerStart >= timerDuration) {
-      appState = 4; // Retorno
-      spawnColored = false;
-    }
-  } 
-  else if (appState == 4) {
-    pathMorphFactor = lerp(pathMorphFactor, 0.0f, 0.03f);
-    stopFactor = lerp(stopFactor, 0.0f, 0.03f);
-    colorResetFactor = lerp(colorResetFactor, 0.0f, 0.02f);
-
-    if (pathMorphFactor < 0.01f && stopFactor < 0.01f && colorResetFactor < 0.01f) {
-      resetSystem();
-    }
-  }
-}
-
+// ==========================================
+// INTERACCIONES MOUSE
+// ==========================================
 void mousePressed() {
-  if (appState == 0) {
-    if (squares.size() == 0) return;
-
-    // Buscar el cuadrado más cercano al click
-    float minDist = 999999;
-    int closestIndex = -1;
-
-    for (int i = 0; i < squares.size(); i++) {
-      float d = dist(mouseX, mouseY, squares.get(i).pos.x, squares.get(i).pos.y);
-      if (d < minDist && d < 45) {
-        minDist = d;
-        closestIndex = i;
-      }
+  float minDist = 30.0f;
+  for (ExternalShape s : externalShapes) {
+    if (dist(mouseX, mouseY, s.pos.x, s.pos.y) < minDist) {
+      minDist = dist(mouseX, mouseY, s.pos.x, s.pos.y);
+      draggedShape = s;
     }
+  }
+  if (draggedShape != null) draggedShape.isDragging = true;
+}
 
-    if (closestIndex != -1) {
-      selectedSquare = squares.get(closestIndex);
-      breakT = selectedSquare.t;
-      activeColor = color(161, 161, 170); // Gris neutro antes de agitar
-
-      // Detener y marcar la fila posterior
-      for (int i = 0; i < squares.size(); i++) {
-        if (squares.get(i).t <= breakT) {
-          squares.get(i).isColored = true;
-          squares.get(i).isFollower = true;
-        }
-      }
-
-      spawnColored = true;
-      appState = 1;
-      stopFactor = 0.0f;
-    }
-  } 
-  else if (appState == 2) {
-    // Definir dirección contraria (Fuerza Opuesta)
-    targetPoint.set(mouseX, mouseY);
-
-    PVector dir = PVector.sub(targetPoint, breakPoint);
-    dir.normalize();
-    
-    // INVERTIR VECTOR: Dirección totalmente opuesta
-    dir.mult(-1.0f);
-
-    float originalLength = startPoint.dist(endPoint);
-    float remainingLength = originalLength * (1.0f - breakT);
-
-    newEndPoint = PVector.add(breakPoint, PVector.mult(dir, remainingLength * 1.5f));
-
-    createExplosion(breakPoint.x, breakPoint.y, activeColor, 40);
-
-    appState = 3;
-    timerStart = millis();
+void mouseReleased() {
+  if (draggedShape != null) {
+    draggedShape.isDragging = false;
+    draggedShape = null;
   }
 }
 
 void createExplosion(float x, float y, int c, int count) {
-  for (int i = 0; i < count; i++) {
-    particles.add(new Particle(x, y, c));
-  }
-}
-
-void resetSystem() {
-  squares.clear();
-  particles.clear();
-  appState = 0;
-  spawnColored = false;
-  stopFactor = 0.0f;
-  pathMorphFactor = 0.0f;
-  colorResetFactor = 1.0f;
-  shakeProgress = 0;
-  selectedSquare = null;
-  activeColor = color(110, 115, 125);
+  for (int i = 0; i < count; i++) particles.add(new Particle(x, y, c));
 }
 
 // ==========================================
 // CLASES COMPLEMENTARIAS
 // ==========================================
-
-class Square {
-  float t;
-  PVector pos;
-  int baseColor;
-  boolean isColored;
-  boolean isFollower;
-  float angle;
-  float pulse;
-  float size;
-
-  Square() {
-    this.t = 0.0f;
-    this.pos = new PVector();
-    this.baseColor = color(110, 115, 125);
-    this.isColored = spawnColored;
-    this.isFollower = false;
-    this.angle = random(TWO_PI);
-    this.pulse = random(TWO_PI);
-    this.size = 14;
-
-    if (this.isColored) {
-      // 60% de probabilidad de ser rebelde y seguir el nuevo camino opuesto
-      this.isFollower = random(1.0f) > 0.4f; 
-    }
+class ExternalShape {
+  PVector pos, vel;
+  int type; 
+  float size = 25.0f;
+  float angle = 0;
+  boolean isDragging = false;
+  
+  ExternalShape(int t, float x, float y) {
+    this.type = t;
+    this.pos = new PVector(x, y);
+    this.vel = PVector.random2D().mult(random(0.5f, 1.5f));
   }
-
+  
   void update() {
-    angle += 0.01f;
-    pulse += 0.05f;
-
-    // Los cuadrados solo se detienen en los estados de congelación y carga (1 y 2).
-    // Al pasar al estado de disparo (3), avanzan libremente de nuevo.
-    if (isColored && (appState == 1 || appState == 2)) {
-      t += flowSpeed * (1.0f - stopFactor);
+    if (isDragging) {
+      pos.x = mouseX;
+      pos.y = mouseY;
+      vel.set(0, 0);
     } else {
-      t += flowSpeed;
-    }
-
-    PVector posOrig = getOriginalPath(t);
-
-    PVector posFrozen = new PVector();
-    if (t < breakT) {
-      float norm = breakT > 0 ? (t / breakT) : 0;
-      posFrozen.set(
-        lerp(startPoint.x, breakPoint.x, norm),
-        lerp(startPoint.y, breakPoint.y, norm)
-      );
-      posFrozen.y += sin(t * TWO_PI * 2) * 8;
-    } else {
-      posFrozen.set(breakPoint.x, breakPoint.y);
-    }
-
-    PVector posAlt = getBrokenPath(t);
-
-    PVector finalBase = new PVector();
-    if (isColored) {
-      finalBase.x = lerp(posOrig.x, posFrozen.x, stopFactor);
-      finalBase.y = lerp(posOrig.y, posFrozen.y, stopFactor);
-    } else {
-      finalBase.set(posOrig.x, posOrig.y);
-    }
-
-    if (isFollower) {
-      pos.x = lerp(finalBase.x, posAlt.x, pathMorphFactor);
-      pos.y = lerp(finalBase.y, posAlt.y, pathMorphFactor);
-    } else {
-      pos.x = lerp(finalBase.x, posOrig.x, pathMorphFactor);
-      pos.y = lerp(finalBase.y, posOrig.y, pathMorphFactor);
-    }
-  }
-
-  void display() {
-    int finalColor = baseColor;
-    boolean hasGradient = false;
-    
-    if (isColored && isFollower) {
-      hasGradient = true;
-      if (appState == 4) {
-        finalColor = lerpColor(baseColor, activeColor, colorResetFactor);
-      } else {
-        finalColor = activeColor;
+      pos.add(vel);
+      vel.mult(0.92f); // Fricción
+      
+      // Flotación aleatoria suave
+      if (vel.mag() < 0.5f) vel.add(PVector.random2D().mult(0.2f));
+      
+      // Rebote en bordes de la pantalla
+      if (pos.x < 20) { pos.x = 20; vel.x *= -1; }
+      if (pos.x > width - 20) { pos.x = width - 20; vel.x *= -1; }
+      if (pos.y < 20) { pos.y = 20; vel.y *= -1; }
+      if (pos.y > height - 20) { pos.y = height - 20; vel.y *= -1; }
+      
+      // ESCUDO INVISIBLE: Prevenir que entren solas flotando
+      float d = dist(pos.x, pos.y, cx, cy);
+      // Si la figura está justo afuera de la línea, la empuja hacia afuera
+      if (d > influenceRadius && d < influenceRadius + 25) {
+        PVector repel = PVector.sub(pos, new PVector(cx, cy));
+        repel.normalize();
+        vel.add(repel.mult(1.5f)); // Fuerza de rebote del escudo
       }
     }
-
+    
+    angle += (type == 1) ? 0.02f : 0.01f;
+  }
+  
+  void display() {
     pushMatrix();
     translate(pos.x, pos.y);
     rotate(angle);
-
-    if (hasGradient) {
-      // Dibujar gradiente lineal interno de forma limpia y fluida
-      noStroke();
-      int cStart = finalColor;
-      int cEnd = lerpColor(finalColor, color(255, 255, 255), 0.45f); // Brillo pastel progresivo
-      
-      for (int j = 0; j < size; j++) {
-        float inter = (float) j / size;
-        int col = lerpColor(cStart, cEnd, inter);
-        stroke(col);
-        line(-size/2, -size/2 + j, size/2, -size/2 + j);
-      }
-      
-      // Contorno sutil del cuadrado para dar definición
-      stroke(255, 45);
-      strokeWeight(1.0f);
-      noFill();
-      rect(0, 0, size, size);
-    } else {
-      // Cuadrado base plano para mantener la estética uniforme
-      fill(finalColor);
-      stroke(255, 30);
-      strokeWeight(1.5f);
-      rect(0, 0, size, size);
-    }
+    
+    int c = (type == 1) ? colSquare : colCircle;
+    
+    noStroke();
+    fill(c, 210);
+    
+    if (type == 1) rect(0, 0, size, size);
+    else ellipse(0, 0, size * 1.15f, size * 1.15f);
     
     popMatrix();
-  }
-
-  PVector getOriginalPath(float val) {
-    float x = lerp(startPoint.x, endPoint.x, val);
-    float y = lerp(startPoint.y, endPoint.y, val);
-    y += sin(val * TWO_PI * 2) * 8;
-    return new PVector(x, y);
-  }
-
-  PVector getBrokenPath(float val) {
-    if (val < breakT) {
-      float norm = breakT > 0 ? (val / breakT) : 0;
-      float x = lerp(startPoint.x, breakPoint.x, norm);
-      float y = lerp(startPoint.y, breakPoint.y, norm);
-      y += sin(val * TWO_PI * 2) * 8;
-      return new PVector(x, y);
-    } else {
-      float norm = map(val, breakT, 1.0f, 0.0f, 1.0f);
-      float x = lerp(breakPoint.x, newEndPoint.x, norm);
-      float y = lerp(breakPoint.y, newEndPoint.y, norm);
-      y += sin(val * TWO_PI * 2) * 8;
-      return new PVector(x, y);
-    }
   }
 }
 
 class Particle {
   float x, y;
-  float vx, vy;
-  float size;
-  float alpha;
-  int colorVal;
-  float decay;
-
+  PVector vel;
+  float size, alpha;
+  int col;
+  
   Particle(float nx, float ny, int c) {
-    x = nx;
-    y = ny;
-    vx = random(-4, 4);
-    vy = random(-4, 4);
-    size = random(2, 6);
-    alpha = 255;
-    colorVal = c;
-    decay = random(3, 8);
+    x = nx; y = ny;
+    // Expansión radial
+    vel = PVector.random2D().mult(random(3.0f, 10.0f)); 
+    size = random(4.0f, 10.0f);
+    alpha = 255; col = c;
   }
-
+  
   void update() {
-    x += vx;
-    y += vy;
-    alpha -= decay;
+    x += vel.x; y += vel.y;
+    vel.mult(0.85f); // Fricción en el aire para que la explosión se frene suavemente
+    alpha -= 5.0f; // Desvanecimiento
   }
-
+  
   void display() {
     noStroke();
-    fill(colorVal, alpha);
+    fill(col, alpha);
     ellipse(x, y, size, size);
   }
 }
