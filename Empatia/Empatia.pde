@@ -1,3 +1,4 @@
+
 ArrayList<TriangleShape> triangles;
 SquareShape mainSquare;
 
@@ -6,17 +7,17 @@ boolean isIntegrated = false;
 float transitionProgress = 0.0f; 
 float globalGlow = 0.0f;
 
-// Colores
+float integrationLevel = 0.0f;
+
 int colTriangle;
 int colSquare;
 int colCircleActive;
 
-// Centro de la pantalla y de la trama
 float gridCX = 450;
-float gridCY = 350;
-
-// Variables de detección de movimiento (Shake)
-float shakeIntensity = 0;
+float gridCY = 310; 
+float zoneW = 504;  
+float zoneH = 420;  
+float cellSize = 42.0f;
 
 void setup() {
   size(900, 700);
@@ -25,65 +26,26 @@ void setup() {
   
   triangles = new ArrayList<TriangleShape>();
   
-  colTriangle = color(255, 183, 178);     // Rosa pastel sólido
-  colSquare = color(199, 206, 234);       // Azul pastel sólido
-  colCircleActive = color(175, 228, 222); // Cian pastel
+  colTriangle = color(255, 183, 178);     
+  colSquare = color(199, 206, 234);       
+  colCircleActive = color(175, 228, 222); 
   
-  // Parámetros de la grilla de grupos ampliada para cubrir toda la pantalla
-  float S = 32.0f;       
-  float margin = 2.0f;   
-  float step = 44.0f;    
+  int initCols = 10;
+  int initRows = 8;
   
-  ArrayList<PVector> targetPositions = new ArrayList<PVector>();
-  ArrayList<Float> targetAngles = new ArrayList<Float>();
+  float startX = gridCX - ((initCols - 1) * cellSize) / 2.0f;
+  float startY = gridCY - ((initRows - 1) * cellSize) / 2.0f; 
   
-  // 1. Calcular las posiciones finales cubriendo toda la pantalla (16 col x 12 filas de grupos)
-  int groupCols = 16;
-  int groupRows = 12;
-  
-  for (int r = 0; r < groupRows; r++) {
-    for (int c = 0; c < groupCols; c++) {
-      // Dejar un hueco central ligeramente más holgado (2x2 de grupos) para que el cuadrado respire
-      if ((c >= 7 && c <= 8) && (r >= 5 && r <= 6)) continue; 
-      
-      float gx = gridCX + (c - (groupCols - 1) / 2.0f) * step;
-      float gy = gridCY + (r - (groupRows - 1) / 2.0f) * step;
-      
-      float distToCentroid = (S / 3.0f) + margin;
-      
-      targetPositions.add(new PVector(gx, gy - distToCentroid));
-      targetAngles.add(PI); 
-      targetPositions.add(new PVector(gx + distToCentroid, gy));
-      targetAngles.add(-HALF_PI);
-      targetPositions.add(new PVector(gx, gy + distToCentroid));
-      targetAngles.add(0.0f); 
-      targetPositions.add(new PVector(gx - distToCentroid, gy));
-      targetAngles.add(HALF_PI); 
+  for (int row = 0; row < initRows; row++) {
+    for (int col = 0; col < initCols; col++) {
+      float ix = startX + col * cellSize;
+      float iy = startY + row * cellSize;
+      triangles.add(new TriangleShape(ix, iy, cellSize));
     }
   }
   
-  // 2. Crear los triángulos en la trama densa inicial con mayor separación
-  int initCols = 32;
-  
-  float spacingX = 34.0f; 
-  float spacingY = 36.0f; 
-  
-  float startX = gridCX - ((initCols - 1) * spacingX) / 2.0f;
-  float startY = 30.0f; 
-  
-  for (int i = 0; i < targetPositions.size(); i++) {
-    int row = i / initCols;
-    int col = i % initCols;
-    
-    float ix = startX + col * spacingX + (row % 2) * (spacingX / 2.0f);
-    float iy = startY + row * spacingY;
-    
-    triangles.add(new TriangleShape(ix, iy, targetPositions.get(i), targetAngles.get(i), S));
-  }
-  
-  // 3. Posición y tamaño del cuadrado abajo (Reducido a 72.0f para un margen estético perfecto)
-  float squareSize = 72.0f; 
-  mainSquare = new SquareShape(gridCX, 655, squareSize);
+  float squareSize = 84.0f; 
+  mainSquare = new SquareShape(gridCX, 620, squareSize);
 }
 
 void draw() {
@@ -93,28 +55,25 @@ void draw() {
   globalGlow = lerp(globalGlow, isIntegrated ? 1.0f : 0.0f, 0.05f);
   background(lerpColor(bgBase, bgResonant, globalGlow));
   
-  // ==========================================
-  // LÓGICA DE TRANSICIÓN (9 SEGUNDOS TOTALES)
-  // ==========================================
+  drawIntegrationZone();
+  
+  boolean squareInZone = isInZone(mainSquare.pos.x, mainSquare.pos.y);
+  
+  if (mainSquare.isDragging && !empathyUnlocked) {
+    if (squareInZone) {
+      integrationLevel = lerp(integrationLevel, 1.0f, 0.04f);
+    } else {
+      integrationLevel = lerp(integrationLevel, 0.0f, 0.05f);
+    }
+  } else if (!mainSquare.isDragging && !empathyUnlocked) {
+    integrationLevel = lerp(integrationLevel, 0.0f, 0.05f);
+  }
+  
   if (empathyUnlocked && transitionProgress < 1.0f) {
-    transitionProgress += 1.0f / 540.0f; 
+    transitionProgress += 1.0f / 150.0f; 
     if (transitionProgress > 1.0f) transitionProgress = 1.0f;
   }
   
-  // Detección de agitación SOLO si el cuadrado está agarrado
-  if (mainSquare.isDragging && !empathyUnlocked) {
-    float mouseVel = dist(mouseX, mouseY, pmouseX, pmouseY);
-    shakeIntensity = lerp(shakeIntensity, mouseVel, 0.2f);
-    
-    if (shakeIntensity > 40) {
-      empathyUnlocked = true;
-    }
-  } else if (!mainSquare.isDragging) {
-    shakeIntensity = 0; 
-  }
-  
-  
-  // Actualizar y dibujar
   for (TriangleShape t : triangles) {
     t.update();
     t.display();
@@ -124,16 +83,114 @@ void draw() {
   mainSquare.display();
 }
 
+void drawIntegrationZone() {
+  pushMatrix();
+  translate(gridCX, gridCY);
+  
+  noFill();
+  stroke(255, 30);
+  strokeWeight(2);
+  rect(0, 0, zoneW, zoneH); 
+  
+  stroke(255, 10);
+  strokeWeight(1);
+  for(float x = -zoneW/2; x <= zoneW/2; x += cellSize) {
+    line(x, -zoneH/2, x, zoneH/2);
+  }
+  for(float y = -zoneH/2; y <= zoneH/2; y += cellSize) {
+    line(-zoneW/2, y, zoneW/2, y);
+  }
+  
+  popMatrix();
+}
+
+boolean isInZone(float x, float y) {
+  return (abs(x - gridCX) < zoneW/2) && (abs(y - gridCY) < zoneH/2);
+}
+
 float easeInOutCubic(float x) {
   return x < 0.5f ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2.0f;
 }
 
-// ==========================================
-// INTERACCIONES
-// ==========================================
+class CellCand {
+  int c, r; float weight;
+  CellCand(int c, int r, float w) { this.c = c; this.r = r; this.weight = w; }
+}
+
+void addCand(int c, int r, float snapX, float snapY, ArrayList<CellCand> candidates, boolean[][] visited) {
+  if(c >= 0 && c < 12 && r >= 0 && r < 10 && !visited[c][r]) {
+    float cellX = (gridCX - zoneW/2) + c * cellSize + cellSize/2;
+    float cellY = (gridCY - zoneH/2) + r * cellSize + cellSize/2;
+    float d = dist(cellX, cellY, snapX, snapY);
+    float w = (d * 1.5f) - (r * 20.0f) + random(0, 50); 
+    candidates.add(new CellCand(c, r, w));
+    visited[c][r] = true;
+  }
+}
+
+void calculateEmpathyPositions(float snapX, float snapY) {
+  ArrayList<CellCand> candidates = new ArrayList<CellCand>();
+  ArrayList<PVector> selectedCells = new ArrayList<PVector>();
+  boolean[][] visited = new boolean[12][10];
+  
+  int sqCol = round((snapX - cellSize - (gridCX - zoneW/2)) / cellSize);
+  int sqRow = round((snapY - cellSize - (gridCY - zoneH/2)) / cellSize);
+  
+  for(int c = sqCol; c <= sqCol+1; c++) {
+    for(int r = sqRow; r <= sqRow+1; r++) {
+      if(c >= 0 && c < 12 && r >= 0 && r < 10) visited[c][r] = true;
+    }
+  }
+  
+  for(int c = sqCol-1; c <= sqCol+2; c++) {
+    for(int r = sqRow-1; r <= sqRow+2; r++) {
+      if(c == sqCol-1 || c == sqCol+2 || r == sqRow-1 || r == sqRow+2) {
+        addCand(c, r, snapX, snapY, candidates, visited);
+      }
+    }
+  }
+  
+  while(selectedCells.size() < 20 && candidates.size() > 0) {
+    int best = 0;
+    for(int i = 1; i < candidates.size(); i++) {
+      if(candidates.get(i).weight < candidates.get(best).weight) best = i;
+    }
+    CellCand chosen = candidates.remove(best);
+    
+    float cellX = (gridCX - zoneW/2) + chosen.c * cellSize + cellSize/2;
+    float cellY = (gridCY - zoneH/2) + chosen.r * cellSize + cellSize/2;
+    selectedCells.add(new PVector(cellX, cellY));
+    
+    addCand(chosen.c - 1, chosen.r, snapX, snapY, candidates, visited);
+    addCand(chosen.c + 1, chosen.r, snapX, snapY, candidates, visited);
+    addCand(chosen.c, chosen.r - 1, snapX, snapY, candidates, visited);
+    addCand(chosen.c, chosen.r + 1, snapX, snapY, candidates, visited);
+  }
+  
+  int idx = 0;
+  // Margen extra entre bloques de celdas vecinas para evitar cruces
+  float cellBlockSize = cellSize * 0.82f; 
+  float distToCentroid = cellBlockSize / 3.0f; 
+  
+  for(PVector cell : selectedCells) {
+    if(idx >= triangles.size()) break;
+    
+    triangles.get(idx).empathyPos.set(cell.x, cell.y - distToCentroid);
+    triangles.get(idx).empathyAngle = PI; idx++;
+    triangles.get(idx).empathyPos.set(cell.x + distToCentroid, cell.y);
+    triangles.get(idx).empathyAngle = -HALF_PI; idx++;
+    triangles.get(idx).empathyPos.set(cell.x, cell.y + distToCentroid);
+    triangles.get(idx).empathyAngle = 0.0f; idx++;
+    triangles.get(idx).empathyPos.set(cell.x - distToCentroid, cell.y);
+    triangles.get(idx).empathyAngle = HALF_PI; idx++;
+  }
+}
+
 void mousePressed() {
   if (dist(mouseX, mouseY, mainSquare.pos.x, mainSquare.pos.y) < mainSquare.size / 2) {
     mainSquare.isDragging = true;
+    empathyUnlocked = false; 
+    isIntegrated = false;
   }
 }
 
@@ -141,75 +198,102 @@ void mouseReleased() {
   if (mainSquare.isDragging) {
     mainSquare.isDragging = false;
     
-    // Si intenta soltarlo cerca del centro de la trama
-    if (dist(mainSquare.pos.x, mainSquare.pos.y, gridCX, gridCY) < 180) {
-      if (empathyUnlocked && transitionProgress > 0.95f) {
-        if (dist(mainSquare.pos.x, mainSquare.pos.y, gridCX, gridCY) < 80) {
-          mainSquare.targetPos.set(gridCX, gridCY);
-          isIntegrated = true;
-        } else {
-          mainSquare.targetPos.set(gridCX, 655); 
-        }
-      } else {
-        // RECHAZO: La trama aún es un bloque rígido
-        mainSquare.targetPos.set(gridCX, 655);
+    if (isInZone(mainSquare.pos.x, mainSquare.pos.y)) {
+      float snapX = round((mainSquare.pos.x - gridCX) / cellSize) * cellSize + gridCX;
+      float snapY = round((mainSquare.pos.y - gridCY) / cellSize) * cellSize + gridCY;
+      
+      snapX = constrain(snapX, gridCX - zoneW/2 + cellSize, gridCX + zoneW/2 - cellSize);
+      snapY = constrain(snapY, gridCY - zoneH/2 + cellSize, gridCY + zoneH/2 - cellSize);
+      
+      mainSquare.targetPos.set(snapX, snapY);
+      
+      calculateEmpathyPositions(snapX, snapY);
+      
+      transitionProgress = 0.0f;
+      empathyUnlocked = true;
+      isIntegrated = true;
+      
+      for (TriangleShape t : triangles) {
+        t.startTransitionPos = t.pos.copy();
+        t.startTransitionAngle = t.angle;
       }
     } else {
-      mainSquare.targetPos.set(gridCX, 655);
+      mainSquare.targetPos.set(gridCX, 620);
+      isIntegrated = false;
     }
   }
 }
 
-// ==========================================
-// CLASES
-// ==========================================
 class TriangleShape {
-  PVector pos;
-  PVector initPos, empathyPos;
-  float angle;
-  float initAngle, empathyAngle;
+  PVector pos, initPos, empathyPos;
+  float angle, initAngle, empathyAngle;
   float size;
   
-  TriangleShape(float ix, float iy, PVector ePos, float eAng, float S) {
+  PVector scatterDir;
+  float transitionDelay;
+  PVector startTransitionPos;
+  float startTransitionAngle;
+  float randomBreatheOffset; 
+  
+  TriangleShape(float ix, float iy, float S) {
     this.pos = new PVector(ix, iy);
     this.initPos = new PVector(ix, iy);
-    this.empathyPos = ePos;
+    this.empathyPos = new PVector(ix, iy);
     
-    this.angle = 0.0f; 
-    this.initAngle = 0.0f;
-    this.empathyAngle = eAng;
-    this.size = S;
+    this.angle = 0.0f; this.initAngle = 0.0f; this.empathyAngle = 0.0f;
+    this.size = S * 0.82f; // Tamaño del triángulo reducido proporcionalmente al margen
+    
+    this.scatterDir = PVector.random2D();
+    this.transitionDelay = random(0.0f, 0.4f);
+    this.randomBreatheOffset = random(TWO_PI);
+    
+    this.startTransitionPos = this.pos.copy();
+    this.startTransitionAngle = this.angle;
   }
   
   void update() {
     if (!empathyUnlocked) {
       PVector targetState = initPos.copy();
-      float d = PVector.dist(mainSquare.pos, initPos);
-      float repelRadius = 200.0f; 
+      float targetAngle = initAngle;
       
-      if (d < repelRadius) {
-        PVector dir = PVector.sub(initPos, mainSquare.pos);
-        dir.normalize();
-        float strength = map(d, 0, repelRadius, 45.0f, 0.0f); 
-        targetState.add(dir.mult(strength));
-        targetState.x += random(-3.0f, 3.0f);
-        targetState.y += random(-3.0f, 3.0f);
+      if (integrationLevel > 0) {
+        float scatterDist = easeInOutCubic(integrationLevel) * 160.0f;
+        float breathe = sin(frameCount * 0.03f + randomBreatheOffset) * 15.0f * integrationLevel;
+        targetState.add(PVector.mult(scatterDir, scatterDist + breathe));
+        targetAngle = initAngle + (scatterDir.x * PI * integrationLevel);
       }
       
-      pos.x = lerp(pos.x, targetState.x, 0.15f);
-      pos.y = lerp(pos.y, targetState.y, 0.15f);
-      angle = initAngle;
+      float d = PVector.dist(mainSquare.pos, targetState);
+      float repelRadius = 160.0f; 
+      
+      if (d < repelRadius) {
+        PVector dir = PVector.sub(targetState, mainSquare.pos);
+        dir.normalize();
+        float t = 1.0f - (d / repelRadius);
+        float strength = easeInOutCubic(t) * 100.0f; 
+        targetState.add(dir.mult(strength));
+      }
+      
+      pos.x = lerp(pos.x, targetState.x, 0.06f);
+      pos.y = lerp(pos.y, targetState.y, 0.06f);
+      angle = lerp(angle, targetAngle, 0.08f);
       
     } else {
-      float t = easeInOutCubic(transitionProgress);
+      float myT = 0;
+      if (transitionProgress > transitionDelay) {
+        myT = map(transitionProgress, transitionDelay, min(1.0f, transitionDelay + 0.5f), 0.0f, 1.0f);
+        myT = constrain(myT, 0.0f, 1.0f);
+      }
       
-      pos.x = lerp(initPos.x, empathyPos.x, t);
-      pos.y = lerp(initPos.y, empathyPos.y, t);
+      float t = easeInOutCubic(myT);
       
-      float diff = empathyAngle - initAngle;
+      pos.x = lerp(startTransitionPos.x, empathyPos.x, t);
+      pos.y = lerp(startTransitionPos.y, empathyPos.y, t);
+      
+      float diff = empathyAngle - startTransitionAngle;
       while (diff < -PI) diff += TWO_PI;
       while (diff > PI) diff -= TWO_PI;
-      angle = initAngle + diff * t;
+      angle = startTransitionAngle + diff * t;
     }
   }
   
@@ -217,16 +301,10 @@ class TriangleShape {
     pushMatrix();
     translate(pos.x, pos.y);
     rotate(angle);
-    
-    noStroke();
-    fill(colTriangle);
-    
+    noStroke(); fill(colTriangle);
     beginShape();
-    vertex(-size/2, size/6.0f);
-    vertex(size/2, size/6.0f);
-    vertex(0, -size/3.0f);
+    vertex(-size/2, size/6.0f); vertex(size/2, size/6.0f); vertex(0, -size/3.0f);
     endShape(CLOSE);
-    
     popMatrix();
   }
 }
@@ -243,24 +321,13 @@ class SquareShape {
   }
   
   void update() {
-    if (isDragging) {
-      pos.x = mouseX;
-      pos.y = mouseY;
-    } else {
-      pos.x = lerp(pos.x, targetPos.x, 0.1f);
-      pos.y = lerp(pos.y, targetPos.y, 0.1f);
-    }
+    if (isDragging) { pos.x = mouseX; pos.y = mouseY; } 
+    else { pos.x = lerp(pos.x, targetPos.x, 0.1f); pos.y = lerp(pos.y, targetPos.y, 0.1f); }
   }
   
   void display() {
-    pushMatrix();
-    translate(pos.x, pos.y);
-    
-    noStroke();
-    fill(colSquare);
-    
-    rect(0, 0, size, size);
-    
+    pushMatrix(); translate(pos.x, pos.y);
+    noStroke(); fill(colSquare); rect(0, 0, size, size);
     popMatrix();
   }
 }
