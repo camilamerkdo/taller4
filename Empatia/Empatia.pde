@@ -1,333 +1,293 @@
+// ==========================================
+// EMPATÍA: La Paciencia de Escuchar (Tríada)
+// ==========================================
 
-ArrayList<TriangleShape> triangles;
-SquareShape mainSquare;
+ArrayList<Entity> entities;
+Entity draggedEntity = null;
 
-boolean empathyUnlocked = false; 
-boolean isIntegrated = false;    
-float transitionProgress = 0.0f; 
-float globalGlow = 0.0f;
-
-float integrationLevel = 0.0f;
-
-int colTriangle;
-int colSquare;
-int colCircleActive;
-
-float gridCX = 450;
-float gridCY = 310; 
-float zoneW = 504;  
-float zoneH = 420;  
-float cellSize = 42.0f;
+// Matriz para rastrear el progreso de sincronización entre cada par [i][j]
+float[][] syncProgress = new float[3][3];
+boolean[][] isLinked = new boolean[3][3];
 
 void setup() {
   size(900, 700);
   smooth(8);
   rectMode(CENTER);
   
-  triangles = new ArrayList<TriangleShape>();
+  entities = new ArrayList<Entity>();
   
-  colTriangle = color(255, 183, 178);     
-  colSquare = color(199, 206, 234);       
-  colCircleActive = color(175, 228, 222); 
+  // 3 Figuras únicas con ritmos (frecuencias) muy diferentes. 
+  // Ahora las frecuencias son más bajas (más tranquilas).
   
-  int initCols = 10;
-  int initRows = 8;
+  // 0: Triángulo (Ritmo rápido/ansioso) - Menta Brillante
+  entities.add(new Entity(0, 0, 250, 250, color(0, 245, 212), 22.0f, 0.08f)); 
   
-  float startX = gridCX - ((initCols - 1) * cellSize) / 2.0f;
-  float startY = gridCY - ((initRows - 1) * cellSize) / 2.0f; 
+  // 1: Cuadrado (Ritmo lento/rígido) - Teal Oscuro
+  entities.add(new Entity(1, 1, 650, 250, color(4, 139, 133), 28.0f, 0.02f)); 
   
-  for (int row = 0; row < initRows; row++) {
-    for (int col = 0; col < initCols; col++) {
-      float ix = startX + col * cellSize;
-      float iy = startY + row * cellSize;
-      triangles.add(new TriangleShape(ix, iy, cellSize));
+  // 2: Círculo (Ritmo medio/fluido) - Cian Suave
+  entities.add(new Entity(2, 2, 450, 550, color(72, 202, 228), 24.0f, 0.04f)); 
+  
+  for(int i = 0; i < 3; i++) {
+    for(int j = 0; j < 3; j++) {
+      syncProgress[i][j] = 0.0f;
+      isLinked[i][j] = false;
     }
   }
-  
-  float squareSize = 84.0f; 
-  mainSquare = new SquareShape(gridCX, 620, squareSize);
 }
 
 void draw() {
-  int bgBase = color(5, 4, 9);
-  int bgResonant = color(22, 15, 38);
+  // Fondo oscuro y sereno
+  int bgBase = color(4, 15, 22);
+  int bgHarmony = color(10, 45, 55);
   
-  globalGlow = lerp(globalGlow, isIntegrated ? 1.0f : 0.0f, 0.05f);
-  background(lerpColor(bgBase, bgResonant, globalGlow));
+  // Contar cuántos enlaces hay para iluminar el fondo
+  int linkCount = 0;
+  if(isLinked[0][1]) linkCount++;
+  if(isLinked[1][2]) linkCount++;
+  if(isLinked[0][2]) linkCount++;
   
-  drawIntegrationZone();
+  float harmonyGlow = linkCount / 3.0f;
+  background(lerpColor(bgBase, bgHarmony, harmonyGlow));
   
-  boolean squareInZone = isInZone(mainSquare.pos.x, mainSquare.pos.y);
   
-  if (mainSquare.isDragging && !empathyUnlocked) {
-    if (squareInZone) {
-      integrationLevel = lerp(integrationLevel, 1.0f, 0.04f);
-    } else {
-      integrationLevel = lerp(integrationLevel, 0.0f, 0.05f);
-    }
-  } else if (!mainSquare.isDragging && !empathyUnlocked) {
-    integrationLevel = lerp(integrationLevel, 0.0f, 0.05f);
-  }
-  
-  if (empathyUnlocked && transitionProgress < 1.0f) {
-    transitionProgress += 1.0f / 150.0f; 
-    if (transitionProgress > 1.0f) transitionProgress = 1.0f;
-  }
-  
-  for (TriangleShape t : triangles) {
-    t.update();
-    t.display();
-  }
-  
-  mainSquare.update();
-  mainSquare.display();
-}
+  // 1. EMPATÍA TRANSITIVA (Si A entiende a B, y B entiende a C, los tres se conectan)
+  if (isLinked[0][1] && isLinked[1][2]) { isLinked[0][2] = true; syncProgress[0][2] = 1.0f; }
+  if (isLinked[0][1] && isLinked[0][2]) { isLinked[1][2] = true; syncProgress[1][2] = 1.0f; }
+  if (isLinked[1][2] && isLinked[0][2]) { isLinked[0][1] = true; syncProgress[0][1] = 1.0f; }
 
-void drawIntegrationZone() {
-  pushMatrix();
-  translate(gridCX, gridCY);
-  
-  noFill();
-  stroke(255, 30);
-  strokeWeight(2);
-  rect(0, 0, zoneW, zoneH); 
-  
-  stroke(255, 10);
-  strokeWeight(1);
-  for(float x = -zoneW/2; x <= zoneW/2; x += cellSize) {
-    line(x, -zoneH/2, x, zoneH/2);
-  }
-  for(float y = -zoneH/2; y <= zoneH/2; y += cellSize) {
-    line(-zoneW/2, y, zoneW/2, y);
-  }
-  
-  popMatrix();
-}
-
-boolean isInZone(float x, float y) {
-  return (abs(x - gridCX) < zoneW/2) && (abs(y - gridCY) < zoneH/2);
-}
-
-float easeInOutCubic(float x) {
-  return x < 0.5f ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2.0f;
-}
-
-class CellCand {
-  int c, r; float weight;
-  CellCand(int c, int r, float w) { this.c = c; this.r = r; this.weight = w; }
-}
-
-void addCand(int c, int r, float snapX, float snapY, ArrayList<CellCand> candidates, boolean[][] visited) {
-  if(c >= 0 && c < 12 && r >= 0 && r < 10 && !visited[c][r]) {
-    float cellX = (gridCX - zoneW/2) + c * cellSize + cellSize/2;
-    float cellY = (gridCY - zoneH/2) + r * cellSize + cellSize/2;
-    float d = dist(cellX, cellY, snapX, snapY);
-    float w = (d * 1.5f) - (r * 20.0f) + random(0, 50); 
-    candidates.add(new CellCand(c, r, w));
-    visited[c][r] = true;
-  }
-}
-
-void calculateEmpathyPositions(float snapX, float snapY) {
-  ArrayList<CellCand> candidates = new ArrayList<CellCand>();
-  ArrayList<PVector> selectedCells = new ArrayList<PVector>();
-  boolean[][] visited = new boolean[12][10];
-  
-  int sqCol = round((snapX - cellSize - (gridCX - zoneW/2)) / cellSize);
-  int sqRow = round((snapY - cellSize - (gridCY - zoneH/2)) / cellSize);
-  
-  for(int c = sqCol; c <= sqCol+1; c++) {
-    for(int r = sqRow; r <= sqRow+1; r++) {
-      if(c >= 0 && c < 12 && r >= 0 && r < 10) visited[c][r] = true;
-    }
-  }
-  
-  for(int c = sqCol-1; c <= sqCol+2; c++) {
-    for(int r = sqRow-1; r <= sqRow+2; r++) {
-      if(c == sqCol-1 || c == sqCol+2 || r == sqRow-1 || r == sqRow+2) {
-        addCand(c, r, snapX, snapY, candidates, visited);
+  // 2. LÓGICA DE ESCUCHA Y CONEXIÓN
+  for (int i = 0; i < 3; i++) {
+    for (int j = i + 1; j < 3; j++) {
+      Entity e1 = entities.get(i);
+      Entity e2 = entities.get(j);
+      float d = e1.pos.dist(e2.pos);
+      
+      if (d < 140) {
+        if (!isLinked[i][j]) {
+          // El progreso es muy lento, invitando a la paciencia (aprox 6 segundos)
+          syncProgress[i][j] += 0.003f;
+          syncProgress[j][i] = syncProgress[i][j];
+          
+          // Fricción visual (Temblor suave que se calma al acercarse al 1.0)
+          float shake = (1.0f - syncProgress[i][j]) * 1.5f; 
+          stroke(lerpColor(e1.col, e2.col, 0.5f), 120 * syncProgress[i][j]);
+          strokeWeight(1.0f);
+          line(e1.pos.x + random(-shake, shake), e1.pos.y + random(-shake, shake), 
+               e2.pos.x + random(-shake, shake), e2.pos.y + random(-shake, shake));
+               
+          if (syncProgress[i][j] >= 1.0f) {
+            isLinked[i][j] = true;
+            isLinked[j][i] = true;
+          }
+        }
+      } else {
+        if (!isLinked[i][j] && syncProgress[i][j] > 0) {
+          // Si se separan antes de entenderse, el progreso se pierde lentamente
+          syncProgress[i][j] -= 0.005f;
+          syncProgress[j][i] = syncProgress[i][j];
+        }
+      }
+      
+      // Dibujar hilos de armonía si ya están conectados
+      if (isLinked[i][j]) {
+        // La línea pulsa suavemente con la respiración compartida
+        float pulseLine = map(sin(e1.phase), -1, 1, 1.0f, 3.0f);
+        stroke(lerpColor(e1.col, e2.col, 0.5f), 200);
+        strokeWeight(pulseLine);
+        line(e1.pos.x, e1.pos.y, e2.pos.x, e2.pos.y);
+        
+        // Física Orbital: Se atraen suavemente y orbitan
+        PVector pull = PVector.sub(e2.pos, e1.pos);
+        float dist = pull.mag();
+        pull.normalize();
+        
+        float force = (dist - 130) * 0.0005f; // Resorte muy delicado
+        e1.vel.add(PVector.mult(pull, force));
+        e2.vel.sub(PVector.mult(pull, force));
+        
+        // Movimiento circular conjunto
+        PVector tangent = new PVector(-pull.y, pull.x).mult(0.0015f);
+        e1.vel.add(tangent);
+        e2.vel.sub(tangent);
       }
     }
   }
   
-  while(selectedCells.size() < 20 && candidates.size() > 0) {
-    int best = 0;
-    for(int i = 1; i < candidates.size(); i++) {
-      if(candidates.get(i).weight < candidates.get(best).weight) best = i;
-    }
-    CellCand chosen = candidates.remove(best);
-    
-    float cellX = (gridCX - zoneW/2) + chosen.c * cellSize + cellSize/2;
-    float cellY = (gridCY - zoneH/2) + chosen.r * cellSize + cellSize/2;
-    selectedCells.add(new PVector(cellX, cellY));
-    
-    addCand(chosen.c - 1, chosen.r, snapX, snapY, candidates, visited);
-    addCand(chosen.c + 1, chosen.r, snapX, snapY, candidates, visited);
-    addCand(chosen.c, chosen.r - 1, snapX, snapY, candidates, visited);
-    addCand(chosen.c, chosen.r + 1, snapX, snapY, candidates, visited);
-  }
+  // 3. SINCRONIZACIÓN DE RITMOS (Agrupar las frecuencias)
+  updateGroupFrequencies();
   
-  int idx = 0;
-  // Margen extra entre bloques de celdas vecinas para evitar cruces
-  float cellBlockSize = cellSize * 0.82f; 
-  float distToCentroid = cellBlockSize / 3.0f; 
-  
-  for(PVector cell : selectedCells) {
-    if(idx >= triangles.size()) break;
-    
-    triangles.get(idx).empathyPos.set(cell.x, cell.y - distToCentroid);
-    triangles.get(idx).empathyAngle = PI; idx++;
-    triangles.get(idx).empathyPos.set(cell.x + distToCentroid, cell.y);
-    triangles.get(idx).empathyAngle = -HALF_PI; idx++;
-    triangles.get(idx).empathyPos.set(cell.x, cell.y + distToCentroid);
-    triangles.get(idx).empathyAngle = 0.0f; idx++;
-    triangles.get(idx).empathyPos.set(cell.x - distToCentroid, cell.y);
-    triangles.get(idx).empathyAngle = HALF_PI; idx++;
+  // 4. ACTUALIZAR Y DIBUJAR FIGURAS
+  for (Entity e : entities) {
+    e.updatePhysics();
+    e.display();
   }
 }
 
+// Lógica para promediar las frecuencias si están unidas y alinear la respiración
+void updateGroupFrequencies() {
+  int[] group = new int[3];
+  for(int i=0; i<3; i++) group[i] = i;
+  
+  if(isLinked[0][1]) { group[1] = group[0]; }
+  if(isLinked[1][2]) { group[2] = group[1]; group[0] = group[1]; } 
+  if(isLinked[0][2]) { group[2] = group[0]; group[1] = group[0]; }
+  
+  float[] sumF = new float[3];
+  int[] countF = new int[3];
+  for(int i=0; i<3; i++) {
+    sumF[group[i]] += entities.get(i).baseFreq;
+    countF[group[i]]++;
+  }
+  
+  for(int g=0; g<3; g++) {
+    if(countF[g] > 0) {
+      float avgF = sumF[g] / countF[g]; // Ritmo promedio (empatía de grupo)
+      int leader = -1;
+      for(int i=0; i<3; i++) {
+        if(group[i] == g) {
+          Entity e = entities.get(i);
+          e.currentFreq = lerp(e.currentFreq, avgF, 0.05f); // Transición suave al nuevo ritmo
+          
+          if(leader == -1) {
+            leader = i;
+            e.phase += e.currentFreq; 
+          } else {
+            // Siguen la misma fase exacta para respirar al unísono
+            e.phase = entities.get(leader).phase; 
+          }
+        }
+      }
+    }
+  }
+}
+
+// ==========================================
+// INTERACCIONES MOUSE
+// ==========================================
 void mousePressed() {
-  if (dist(mouseX, mouseY, mainSquare.pos.x, mainSquare.pos.y) < mainSquare.size / 2) {
-    mainSquare.isDragging = true;
-    empathyUnlocked = false; 
-    isIntegrated = false;
+  for (Entity e : entities) {
+    if (dist(mouseX, mouseY, e.pos.x, e.pos.y) < max(35, e.sz)) {
+      draggedEntity = e;
+      break;
+    }
   }
 }
 
 void mouseReleased() {
-  if (mainSquare.isDragging) {
-    mainSquare.isDragging = false;
-    
-    if (isInZone(mainSquare.pos.x, mainSquare.pos.y)) {
-      float snapX = round((mainSquare.pos.x - gridCX) / cellSize) * cellSize + gridCX;
-      float snapY = round((mainSquare.pos.y - gridCY) / cellSize) * cellSize + gridCY;
-      
-      snapX = constrain(snapX, gridCX - zoneW/2 + cellSize, gridCX + zoneW/2 - cellSize);
-      snapY = constrain(snapY, gridCY - zoneH/2 + cellSize, gridCY + zoneH/2 - cellSize);
-      
-      mainSquare.targetPos.set(snapX, snapY);
-      
-      calculateEmpathyPositions(snapX, snapY);
-      
-      transitionProgress = 0.0f;
-      empathyUnlocked = true;
-      isIntegrated = true;
-      
-      for (TriangleShape t : triangles) {
-        t.startTransitionPos = t.pos.copy();
-        t.startTransitionAngle = t.angle;
-      }
-    } else {
-      mainSquare.targetPos.set(gridCX, 620);
-      isIntegrated = false;
-    }
-  }
+  draggedEntity = null;
 }
 
-class TriangleShape {
-  PVector pos, initPos, empathyPos;
-  float angle, initAngle, empathyAngle;
-  float size;
+// ==========================================
+// CLASE ENTITY
+// ==========================================
+class Entity {
+  int id; 
+  int type; // 0: Triángulo, 1: Cuadrado, 2: Círculo
+  PVector pos, vel;
+  int col;
+  float sz;
   
-  PVector scatterDir;
-  float transitionDelay;
-  PVector startTransitionPos;
-  float startTransitionAngle;
-  float randomBreatheOffset; 
+  float baseFreq;
+  float currentFreq;
+  float phase;
+  float angle = 0;
   
-  TriangleShape(float ix, float iy, float S) {
-    this.pos = new PVector(ix, iy);
-    this.initPos = new PVector(ix, iy);
-    this.empathyPos = new PVector(ix, iy);
-    
-    this.angle = 0.0f; this.initAngle = 0.0f; this.empathyAngle = 0.0f;
-    this.size = S * 0.82f; // Tamaño del triángulo reducido proporcionalmente al margen
-    
-    this.scatterDir = PVector.random2D();
-    this.transitionDelay = random(0.0f, 0.4f);
-    this.randomBreatheOffset = random(TWO_PI);
-    
-    this.startTransitionPos = this.pos.copy();
-    this.startTransitionAngle = this.angle;
+  Entity(int id, int t, float x, float y, int c, float s, float freq) {
+    this.id = id;
+    this.type = t;
+    this.pos = new PVector(x, y);
+    // Velocidad inicial muy tranquila
+    this.vel = PVector.random2D().mult(random(0.1f, 0.3f));
+    this.col = c;
+    this.sz = s;
+    this.baseFreq = freq;
+    this.currentFreq = freq;
+    this.phase = random(TWO_PI);
   }
   
-  void update() {
-    if (!empathyUnlocked) {
-      PVector targetState = initPos.copy();
-      float targetAngle = initAngle;
-      
-      if (integrationLevel > 0) {
-        float scatterDist = easeInOutCubic(integrationLevel) * 160.0f;
-        float breathe = sin(frameCount * 0.03f + randomBreatheOffset) * 15.0f * integrationLevel;
-        targetState.add(PVector.mult(scatterDir, scatterDist + breathe));
-        targetAngle = initAngle + (scatterDir.x * PI * integrationLevel);
-      }
-      
-      float d = PVector.dist(mainSquare.pos, targetState);
-      float repelRadius = 160.0f; 
-      
-      if (d < repelRadius) {
-        PVector dir = PVector.sub(targetState, mainSquare.pos);
-        dir.normalize();
-        float t = 1.0f - (d / repelRadius);
-        float strength = easeInOutCubic(t) * 100.0f; 
-        targetState.add(dir.mult(strength));
-      }
-      
-      pos.x = lerp(pos.x, targetState.x, 0.06f);
-      pos.y = lerp(pos.y, targetState.y, 0.06f);
-      angle = lerp(angle, targetAngle, 0.08f);
-      
+  void updatePhysics() {
+    if (this == draggedEntity) {
+      // Movimiento suave hacia el mouse (no instantáneo, para mantener la calma)
+      pos.x = lerp(pos.x, mouseX, 0.2f);
+      pos.y = lerp(pos.y, mouseY, 0.2f);
+      vel.set(0, 0);
     } else {
-      float myT = 0;
-      if (transitionProgress > transitionDelay) {
-        myT = map(transitionProgress, transitionDelay, min(1.0f, transitionDelay + 0.5f), 0.0f, 1.0f);
-        myT = constrain(myT, 0.0f, 1.0f);
+      pos.add(vel);
+      vel.mult(0.96f); // Mucha fricción = movimientos más flotantes y lentos
+      
+      // Vagan libremente si están sueltos y lentos
+      if (vel.mag() < 0.2f) {
+        vel.add(PVector.random2D().mult(0.02f));
       }
       
-      float t = easeInOutCubic(myT);
-      
-      pos.x = lerp(startTransitionPos.x, empathyPos.x, t);
-      pos.y = lerp(startTransitionPos.y, empathyPos.y, t);
-      
-      float diff = empathyAngle - startTransitionAngle;
-      while (diff < -PI) diff += TWO_PI;
-      while (diff > PI) diff -= TWO_PI;
-      angle = startTransitionAngle + diff * t;
+      // Rebotes delicados en los bordes
+      if (pos.x < 40 || pos.x > width - 40) vel.x *= -1;
+      if (pos.y < 40 || pos.y > height - 40) vel.y *= -1;
+      pos.x = constrain(pos.x, 40, width - 40);
+      pos.y = constrain(pos.y, 40, height - 40);
     }
+    
+    // Rotación muy lenta
+    angle += 0.005f;
   }
   
   void display() {
     pushMatrix();
-    translate(pos.x, pos.y);
+    
+    // Determinar si esta figura está experimentando fricción de escucha
+    float maxFriction = 0;
+    for(int j=0; j<3; j++) {
+      if (j != id && !isLinked[id][j] && syncProgress[id][j] > 0) {
+        maxFriction = max(maxFriction, (1.0f - syncProgress[id][j]));
+      }
+    }
+    // Temblor muy sutil
+    float shake = maxFriction * 1.0f;
+    translate(pos.x + random(-shake, shake), pos.y + random(-shake, shake));
     rotate(angle);
-    noStroke(); fill(colTriangle);
-    beginShape();
-    vertex(-size/2, size/6.0f); vertex(size/2, size/6.0f); vertex(0, -size/3.0f);
-    endShape(CLOSE);
-    popMatrix();
-  }
-}
-
-class SquareShape {
-  PVector pos, targetPos;
-  float size;
-  boolean isDragging = false;
-  
-  SquareShape(float x, float y, float s) {
-    this.pos = new PVector(x, y);
-    this.targetPos = new PVector(x, y);
-    this.size = s;
-  }
-  
-  void update() {
-    if (isDragging) { pos.x = mouseX; pos.y = mouseY; } 
-    else { pos.x = lerp(pos.x, targetPos.x, 0.1f); pos.y = lerp(pos.y, targetPos.y, 0.1f); }
-  }
-  
-  void display() {
-    pushMatrix(); translate(pos.x, pos.y);
-    noStroke(); fill(colSquare); rect(0, 0, size, size);
+    
+    // Respiración (tamaño que pulsa)
+    float currentSize = sz + sin(phase) * (sz * 0.3f);
+    
+    // Comprobar si está unido a algo para mostrar el aura empática
+    boolean isUnited = (isLinked[id][0] || isLinked[id][1] || isLinked[id][2]);
+    
+    if (isUnited) {
+      noStroke();
+      fill(red(col), green(col), blue(col), 60);
+      if (type == 0) {
+        float glowR = currentSize * 1.6f;
+        beginShape();
+        for (int i = 0; i < 3; i++) {
+          float a = i * TWO_PI / 3.0f - HALF_PI;
+          vertex(cos(a) * glowR, sin(a) * glowR);
+        }
+        endShape(CLOSE);
+      } else if (type == 1) {
+        rect(0, 0, currentSize * 2.2f, currentSize * 2.2f);
+      } else {
+        ellipse(0, 0, currentSize * 2.4f, currentSize * 2.4f);
+      }
+    }
+    
+    // Figura Principal
+    noStroke();
+    fill(col);
+    
+    if (type == 0) {
+      beginShape();
+      for (int i = 0; i < 3; i++) {
+        float a = i * TWO_PI / 3.0f - HALF_PI;
+        vertex(cos(a) * currentSize, sin(a) * currentSize);
+      }
+      endShape(CLOSE);
+    } else if (type == 1) {
+      rect(0, 0, currentSize * 1.5f, currentSize * 1.5f);
+    } else if (type == 2) {
+      ellipse(0, 0, currentSize * 1.6f, currentSize * 1.6f);
+    }
+    
     popMatrix();
   }
 }
