@@ -53,9 +53,11 @@ void draw() {
   background(lerpColor(bgBase, bgReaffirm, reaffirmGlow));
   
   // 1. DIBUJAR ZONA DE INFLUENCIA
-  noStroke();
-  fill(255, 20); 
+  stroke(0, 255, 255);
+  strokeWeight(0.2);
+  noFill(); 
   ellipse(cx, cy, influenceRadius * 2, influenceRadius * 2);
+
   
   // 2. ANALIZAR LA PRESIÓN EXTERNA
   int countSq = 0;
